@@ -231,6 +231,18 @@ export const watch = <A>(source: Watchable<A>): Effect.Effect<A, never, Instance
   Effect.flatMap(Instance, (instance) => Effect.map(instance.slot(subscribe(source, instance)), () => read(source)))
 
 /**
+ * Runs `effect` once per component instance, on its first render, in the
+ * instance scope, and returns its result on every render. Use it to start
+ * a fiber that lives with the component:
+ *
+ * ```ts
+ * yield* View.once(Effect.forkScoped(ticker))
+ * ```
+ */
+export const once = <A>(effect: Effect.Effect<A, never, Scope.Scope>): Effect.Effect<A, never, Instance> =>
+  Effect.flatMap(Instance, (instance) => instance.slot(effect))
+
+/**
  * `false` during the HTTP render of the page, `true` in the live session.
  * Both run the component; use it to skip work that only matters live, such
  * as subscribing to a feed or starting a timer.

@@ -12,6 +12,7 @@ export default defineConfig({
         "index": "src/index.ts",
         "view": "src/view.ts",
         "server": "src/server.ts",
+        "island": "src/island.ts",
         "jsx-runtime": "src/jsx-runtime.ts",
         "jsx-dev-runtime": "src/jsx-dev-runtime.ts"
       },

@@ -10,6 +10,11 @@
  *   own with idiomorph, and a list whose keys changed is reconciled in
  *   place by key (existing elements are moved, new ones created, missing
  *   ones removed); focus and typed input survive
+ * - leaves elements marked `data-lsc-ignore` alone, and runs the lifecycle
+ *   (`mounted`, `updated`, `destroyed`) registered with `lsc.hook(name, …)`
+ *   for elements carrying `data-lsc-hook`; islands (`data-lsc-island`) are
+ *   a built-in hook that hands a mount point and JSON props to the client
+ *   renderer registered with `lsc.island(name, { mount, update, unmount })`
  * - delegates DOM events to elements carrying `data-lsc-<event>` and sends
  *   the handler id plus a small payload (value, checked, key, form fields)
  */
@@ -152,6 +157,16 @@ export const script: string = `${idiomorph}
   lsc.morph = function (element, markup, options) {
     return Idiomorph.morph(element, markup, options);
   };
+  lsc.hooks = lsc.hooks || {};
+  lsc.islands = lsc.islands || {};
+  lsc.hook = function (name, hook) {
+    lsc.hooks[name] = hook;
+    mountAll(root);
+  };
+  lsc.island = function (name, island) {
+    lsc.islands[name] = island;
+    mountAll(root);
+  };
   ${core}
   var protocol = location.protocol === "https:" ? "wss:" : "ws:";
   var url = protocol + "//" + location.host + location.pathname + location.search;
@@ -180,11 +195,110 @@ export const script: string = `${idiomorph}
     };
   }
 
+  function isTextual(element) {
+    if (element.nodeName === "TEXTAREA") return true;
+    if (element.nodeName !== "INPUT") return false;
+    var type = element.type;
+    return type !== "checkbox" && type !== "radio" && type !== "submit" && type !== "button" &&
+      type !== "reset" && type !== "file" && type !== "range" && type !== "color";
+  }
+
   var morphOptions = {
-    // The text input being typed into keeps the user's value.
-    ignoreActiveValue: true,
-    callbacks: { afterNodeAdded: autofocus, beforeNodeRemoved: forget }
+    callbacks: {
+      // The text input being typed into keeps the user's value. (idiomorph's
+      // ignoreActiveValue would also skip the children of any focused
+      // element, so a clicked button would not update its label.)
+      beforeAttributeUpdated: function (name, element) {
+        return !(name === "value" && element === document.activeElement && isTextual(element));
+      },
+      beforeNodeMorphed: function (node) {
+        return !(node.nodeType === 1 && node.hasAttribute("data-lsc-ignore"));
+      },
+      afterNodeMorphed: function (node) {
+        if (node.nodeType === 1) updated(node);
+      },
+      afterNodeAdded: function (node) {
+        autofocus(node);
+        mountAll(node);
+      },
+      beforeNodeRemoved: leaving
+    }
   };
+
+  // ---- lifecycle: hooks and islands ----
+  var mounted = new WeakSet();
+  var handles = new WeakMap();
+  var warned = Object.create(null);
+
+  // The island hook: parses props, hands the mount point to the renderer.
+  var islandHook = {
+    mounted: function (element) {
+      var name = element.getAttribute("data-lsc-island");
+      var island = lsc.islands[name];
+      if (!island) {
+        if (!warned[name]) console.warn("effect-lsc: no island registered as " + JSON.stringify(name));
+        warned[name] = true;
+        return false;
+      }
+      var props = element.getAttribute("data-lsc-props");
+      var target = element.querySelector("[data-lsc-ignore]") || element;
+      handles.set(element, { props: props, handle: island.mount(target, props === null ? undefined : JSON.parse(props)) });
+      return true;
+    },
+    updated: function (element) {
+      var state = handles.get(element);
+      var props = element.getAttribute("data-lsc-props");
+      if (!state || state.props === props) return;
+      state.props = props;
+      if (state.handle && state.handle.update) state.handle.update(props === null ? undefined : JSON.parse(props));
+    },
+    destroyed: function (element) {
+      var state = handles.get(element);
+      handles.delete(element);
+      if (state && state.handle && state.handle.unmount) state.handle.unmount();
+    }
+  };
+
+  function hookOf(element) {
+    if (element.hasAttribute("data-lsc-island")) return islandHook;
+    var name = element.getAttribute("data-lsc-hook");
+    return name === null ? null : lsc.hooks[name] || null;
+  }
+
+  function each(node, f) {
+    if (node.nodeType !== 1) return;
+    if (node.hasAttribute("data-lsc-hook") || node.hasAttribute("data-lsc-island")) f(node);
+    var inner = node.querySelectorAll("[data-lsc-hook],[data-lsc-island]");
+    for (var i = 0; i < inner.length; i++) f(inner[i]);
+  }
+
+  // Mounts every hooked element under node that is not mounted yet.
+  function mountAll(node) {
+    each(node, function (element) {
+      if (mounted.has(element)) return;
+      var hook = hookOf(element);
+      if (!hook) return;
+      var ok = hook.mounted ? hook.mounted(element) : true;
+      if (ok !== false) mounted.add(element);
+    });
+  }
+
+  function updated(element) {
+    if (!mounted.has(element)) return;
+    var hook = hookOf(element);
+    if (hook && hook.updated) hook.updated(element);
+  }
+
+  // A subtree is leaving the DOM: forget its anchors, destroy its hooks.
+  function leaving(node) {
+    forget(node);
+    each(node, function (element) {
+      if (!mounted.has(element)) return;
+      mounted.delete(element);
+      var hook = hookOf(element);
+      if (hook && hook.destroyed) hook.destroyed(element);
+    });
+  }
 
   // Anchored elements by path. A hit is verified, since a morph may have
   // replaced the element; removed subtrees are forgotten so nothing leaks.
@@ -249,11 +363,14 @@ export const script: string = `${idiomorph}
     for (var m = 0; m < previous.keys.length; m++) {
       var old = previous.keys[m];
       if (!(old in next.items)) {
-        forget(elements[old]);
+        leaving(elements[old]);
         elements[old].remove();
       }
     }
-    for (var c = 0; c < created.length; c++) autofocus(created[c]);
+    for (var c = 0; c < created.length; c++) {
+      autofocus(created[c]);
+      mountAll(created[c]);
+    }
     return true;
   }
 
@@ -293,6 +410,7 @@ export const script: string = `${idiomorph}
     if (morphs === null) {
       anchors = new Map();
       lsc.morph(root, html(tree, "r"), Object.assign({ morphStyle: "innerHTML" }, morphOptions));
+      mountAll(root);
       return;
     }
     for (var m = 0; m < morphs.length; m++) {
@@ -352,6 +470,7 @@ export const script: string = `${idiomorph}
     if (type === "submit") element.reset();
   }
 
+  mountAll(root);
   connect();
 })();
 `

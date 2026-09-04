@@ -36,6 +36,10 @@
       "types": "./dist/server.d.ts",
       "default": "./dist/server.js"
     },
+    "./island": {
+      "types": "./dist/island.d.ts",
+      "default": "./dist/island.js"
+    },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
       "default": "./dist/jsx-runtime.js"
@@ -60,6 +64,7 @@
     "counter": "bun examples/counter/index.tsx",
     "shared-counter": "bun examples/shared-counter/index.tsx",
     "todomvc": "bun examples/todomvc/index.tsx",
+    "react-island": "bun examples/react-island/index.tsx",
     "prepublishOnly": "bun run check && bun run test && bun run build"
   },
   "peerDependencies": {

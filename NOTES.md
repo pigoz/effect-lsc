@@ -129,13 +129,28 @@ there is an error boundary story.
 
 ### Islands
 
-`<Island>` would mark a subtree that another client renderer owns. The
-current design leaves room for it: the renderer already emits a stable path
-per node, and the morph could be told to skip a subtree (`data-lsc-island`)
-and hand its serialized props to a client hydrator. What the server would
-need: a way to render the island's initial HTML (or a placeholder) and to
-forward events from inside the island (or not). Nothing in the session
-model changes.
+Done, as predicted: nothing in the session model changed. `<Island name
+props>` renders a container carrying the name and the props as JSON around
+a mount point marked `data-lsc-ignore`, which the morph skips (idiomorph's
+`beforeNodeMorphed`) and list reconciliation moves as a whole. The island
+node is a component, so it is anchored and memoized like any other; a props
+change morphs its container only, and `updated` hands the new props to the
+renderer. Islands are a built-in case of element hooks
+(`data-lsc-hook`, `lsc.hook(name, { mounted, updated, destroyed })`), whose
+lifecycle is driven from the places the runtime already knows nodes enter
+and leave: the initial scan, idiomorph's add/morph/remove callbacks, and the
+list reconciliation. `examples/react-island` mounts a React chart fed by a
+server ticker; React state survives every patch, and hide/show
+unmounts and remounts it.
+
+Found while testing it: idiomorph's `ignoreActiveValue` also skips the
+children of the focused element, so a clicked button never updated its
+label until it lost focus. The runtime now protects only the `value` of
+the focused text input, through `beforeAttributeUpdated`.
+
+Not covered yet: events from an island back to the server (an island can
+only talk to the server through DOM events on server-handled elements) and
+server-rendered content for the island beyond a placeholder.
 
 ### Shared application state
 
@@ -269,13 +284,8 @@ completes it on the DOM side, the second is framework territory.
    the wire, in-place reconciliation by key in the browser. A real reorder
    still sends the whole key order (O(n) keys); a move encoding is possible
    if it ever matters.
-2. **Ignored regions** (`phx-update="ignore"`): an attribute the morph does
-   not touch, so a client library (editor, map, chart) can own a subtree.
-   With idiomorph it is a `beforeNodeMorphed` callback returning `false`.
-   Prerequisite for islands.
-3. **Element lifecycle hooks** (`phx-hook`: mounted, updated, destroyed):
-   the hook to start client code on a node. With ignored regions this gives
-   minimal islands without any other runtime.
+2. ~~Ignored regions~~ Done: `data-lsc-ignore`.
+3. ~~Element lifecycle hooks~~ Done: `data-lsc-hook` and `lsc.hook`.
 4. **`<title>` and `<head>` updates.** The layout is static today; idiomorph
    has a `head` option, only a channel to send them is missing.
 
@@ -293,8 +303,8 @@ event names; closures cover both.
 | loading states (`phx-*-loading`, `disable-with`) | feedback during the round trip; `data-lsc-disconnected` exists | small |
 | file uploads | chunked over the socket in LiveView | large |
 
-Suggested order: ignored regions and hooks (they unlock islands, one of the
-three open questions), debounce and key filters. Streams and the origin
-check are done.
+Suggested order: debounce and key filters, form serialization, then design
+navigation and reconnection together. Streams, ignored regions, hooks,
+islands, `connected` and the origin check are done.
 Then stop and design navigation and reconnection together: both touch the
 session model and should not be bolted on one at a time.

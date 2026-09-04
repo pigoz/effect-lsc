@@ -57,6 +57,7 @@ bun install
 bun examples/counter/index.tsx          # per-tab state
 bun examples/shared-counter/index.tsx   # one counter shared by every tab
 bun examples/todomvc/index.tsx          # shared list, open it in two tabs
+bun examples/react-island/index.tsx     # a React chart inside a server-driven page
 PORT=4000 bun examples/counter/index.tsx # all examples listen on PORT, default 3000
 ```
 
@@ -110,6 +111,7 @@ That is the whole integration: TypeScript, Bun and Vite compile `<div/>` to
 | `View.watch(state)` | Reads a `State` received from a parent, a `SharedState`, or (escape hatch) any `SubscriptionRef`, and re-renders the component whenever it changes. The only bridge between Effect state and the component graph. |
 | `View.raw(html)` | Trusted HTML, emitted verbatim. |
 | `View.render(jsx)` | Renders once to an HTML string. Handy in tests. |
+| `View.once(effect)` | Runs an Effect once per component instance, in its scope, and returns its result on every render. `View.once(Effect.forkScoped(ticker))` starts a fiber that lives with the component. |
 | `View.connected` | `false` during the HTTP render of the page, `true` in the live session. Both run the component; skip work that only matters live (timers, subscriptions). |
 | `View.Instance` | The service that `State` and `watch` need; the renderer provides it. Its `scope` closes when the component leaves the tree. |
 
@@ -146,6 +148,33 @@ a predicate to allow others.
 
 Services required by the root component must be provided to the router
 layer, as in the TodoMVC example (`Layer.provide(Todos.layer)`).
+
+### `effect-lsc/island`
+
+`<Island name="Chart" props={{ values }}>` is a boundary where a client-side
+renderer owns the DOM. The server renders a container with the name and the
+props as JSON around a mount point the runtime never morphs; the page
+registers the renderer:
+
+```html
+<script type="module">
+  import { createRoot } from "https://esm.sh/react-dom@19/client"
+  window.lsc.island("Chart", {
+    mount(element, props) {
+      const root = createRoot(element)
+      root.render(<Chart {...props} />)
+      return { update: (props) => root.render(<Chart {...props} />), unmount: () => root.unmount() }
+    }
+  })
+</script>
+```
+
+`mount` runs when the island enters the page, `update` whenever the server
+changes the props, `unmount` when it leaves. React's own state survives every
+server patch; see `examples/react-island`. Underneath are two generic
+attributes any element can use: `data-lsc-ignore` marks a subtree the
+runtime never touches, and `data-lsc-hook="name"` runs the `mounted`,
+`updated` and `destroyed` callbacks registered with `window.lsc.hook(name, …)`.
 
 ## How it works
 
@@ -223,8 +252,7 @@ fails when the copy is stale.
 ## Status
 
 MVP. Working: server render, live sessions with slot-level patches and
-memoized components, local state, shared state via `View.watch`, nested
-keyed components with their own state, forms, lists, many event types,
-cross-session updates. Not yet:
-islands, state recovery on reconnect, user-level authorization. See
-NOTES.md.
+memoized components, local and shared state, nested keyed components with
+their own state, forms, lists, many event types, cross-session updates,
+islands and element hooks, origin checks. Not yet: state recovery on
+reconnect, navigation, user-level authorization. See NOTES.md.
