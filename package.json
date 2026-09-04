@@ -13,6 +13,14 @@
     "websocket",
     "bun"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pigoz/effect-lsc.git"
+  },
+  "homepage": "https://github.com/pigoz/effect-lsc",
+  "bugs": {
+    "url": "https://github.com/pigoz/effect-lsc/issues"
+  },
   "sideEffects": false,
   "exports": {
     "./package.json": "./package.json",
