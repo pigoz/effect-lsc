@@ -4,6 +4,15 @@
   "type": "module",
   "description": "Effect Live Server Components: server-owned, LiveView-style UI with Effect and plain JSX",
   "license": "MIT",
+  "keywords": [
+    "effect",
+    "effect-ts",
+    "liveview",
+    "server-components",
+    "jsx",
+    "websocket",
+    "bun"
+  ],
   "sideEffects": false,
   "exports": {
     "./package.json": "./package.json",
@@ -40,7 +49,8 @@
     "build": "rm -rf dist && vite build && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "counter": "bun examples/counter/index.tsx",
-    "todomvc": "bun examples/todomvc/index.tsx"
+    "todomvc": "bun examples/todomvc/index.tsx",
+    "prepublishOnly": "bun run check && bun run test && bun run build"
   },
   "peerDependencies": {
     "effect": "^4.0.0-rc.112"
@@ -54,5 +64,8 @@
     "typescript": "7.0.2",
     "vite": "^8.2.2",
     "vitest": "4.1.11"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
