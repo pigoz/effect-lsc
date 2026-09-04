@@ -139,11 +139,9 @@ export const originAllowed = (
   if (typeof origins === "function") return origins(origin)
   if (origins !== undefined) return origins.includes(origin)
   if (host === undefined) return false
-  try {
-    return new URL(origin).host === host
-  } catch {
-    return false
-  }
+  // Origin is `scheme "://" host [ ":" port ]` (RFC 6454)
+  const match = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)$/i.exec(origin)
+  return match !== null && match[1] === host
 }
 
 const forbidden = (request: HttpServerRequest.HttpServerRequest) =>
