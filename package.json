@@ -57,6 +57,7 @@
     "build": "rm -rf dist && vite build && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "counter": "bun examples/counter/index.tsx",
+    "shared-counter": "bun examples/shared-counter/index.tsx",
     "todomvc": "bun examples/todomvc/index.tsx",
     "prepublishOnly": "bun run check && bun run test && bun run build"
   },

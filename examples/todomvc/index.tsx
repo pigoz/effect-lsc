@@ -29,7 +29,12 @@ const Routes = Server.mount("/", App, { layout })
 
 HttpRouter.serve(Routes).pipe(
   Layer.provide(Todos.layer),
-  Layer.provide(BunHttpServer.layerConfig({ port: Config.port("PORT").pipe(Config.withDefault(3000)) })),
+  Layer.provide(BunHttpServer.layerConfig({
+    port: Config.port("PORT").pipe(Config.withDefault(3000)),
+    // Interrupt live sessions first, then stop: Ctrl+C exits at once.
+    // Needs Bun 1.4.1+.
+    disablePreemptiveShutdown: Config.succeed(true)
+  })),
   Layer.launch,
   BunRuntime.runMain
 )

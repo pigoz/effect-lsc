@@ -88,6 +88,12 @@ there is an error boundary story.
   needs `Origin` validation and a session/auth story at `Server.mount`.
 - Rendering the layout also goes through the renderer, with a throwaway
   session, so a layout is never live.
+- Shutdown: Bun's graceful `server.stop()` waits for open WebSockets, and
+  `BunHttpServer` waits for it (20 s by default) before interrupting the
+  fibers that own them. The examples use `disablePreemptiveShutdown: true`
+  (interrupt first, then stop: 30 ms), which needs Bun 1.4.1+; on 1.3.x that
+  stop never resolves. The proper fix belongs in `@effect/platform-bun`:
+  interrupt fibers owning upgraded sockets before waiting.
 - Attribute typing covers common elements; unknown attributes on known
   elements are compile errors, by design.
 

@@ -38,7 +38,7 @@ const Counter = View.Component(function*() {
 const App = Server.mount("/", Counter, { title: "Counter" })
 
 HttpRouter.serve(App).pipe(
-  Layer.provide(BunHttpServer.layer({ port: 3000 })),
+  Layer.provide(BunHttpServer.layer({ port: 3000, disablePreemptiveShutdown: true })),
   Layer.launch,
   BunRuntime.runMain
 )
@@ -50,11 +50,32 @@ its state, or the callback.
 
 ## Running the examples
 
+Requires Bun 1.4.1 or later.
+
 ```sh
 bun install
-bun examples/counter/index.tsx   # http://localhost:3000
-bun examples/todomvc/index.tsx   # http://localhost:3000, open it in two tabs
-PORT=4000 bun examples/counter/index.tsx
+bun examples/counter/index.tsx          # per-tab state
+bun examples/shared-counter/index.tsx   # one counter shared by every tab
+bun examples/todomvc/index.tsx          # shared list, open it in two tabs
+PORT=4000 bun examples/counter/index.tsx # all examples listen on PORT, default 3000
+```
+
+`View.State` is local to a session (a browser tab). To share state across
+tabs, put a `SubscriptionRef` in a service and `View.watch` it, as in
+`examples/shared-counter`:
+
+```tsx
+class Count extends Context.Service<Count, SubscriptionRef.SubscriptionRef<number>>()("app/Count") {
+  static readonly layer = Layer.effect(Count, SubscriptionRef.make(0))
+}
+
+const Counter = View.Component(function*() {
+  const shared = yield* Count
+  const total = yield* View.watch(shared) // re-rendered in every tab on change
+  return <button onClick={() => SubscriptionRef.update(shared, (n) => n + 1)}>{total}</button>
+})
+
+HttpRouter.serve(Server.mount("/", Counter)).pipe(Layer.provide(Count.layer), …)
 ```
 
 ## Setup in your own project
@@ -136,6 +157,15 @@ session lifetimes, `SubscriptionRef` and `Stream` for state and change
 notification, `Queue.sliding(1)` for render coalescing, `Schema` for the
 wire protocol, `Context.Service` and `Layer` for wiring. There is no custom
 Promise-based infrastructure.
+
+## Shutdown
+
+The examples pass `disablePreemptiveShutdown: true` to the Bun server layer,
+so Ctrl+C exits immediately: live sessions are interrupted first, their
+WebSockets close, then the server stops. With the default settings
+`BunHttpServer` waits up to 20 seconds for the sockets before interrupting
+anything. This needs Bun 1.4.1 or later; on older Bun the stop never
+resolves once a socket was upgraded.
 
 ## Development
 
