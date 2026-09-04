@@ -58,19 +58,22 @@ computations run twice, and a component that reads the request could see two
 different contexts. LiveView has the same shape (`connected?/1`); a
 `View.connected` flag or a mount-once hook would be the fix.
 
-**Slot-level patches, memoized instances, idiomorph on the client.** A render is a tree of
-statics and slots (`wire.ts`); the session keeps the tree the browser has and
-sends only changed slots, statics once per fingerprint, lists diffed by
-`key`, components as nested nodes. The browser merges the patch into its
-copy of the tree, regenerates the HTML and morphs it into the page with
-idiomorph (vendored as a string by `scripts/vendor-idiomorph.ts`, no asset
-pipeline). `ignoreActiveValue` keeps the value of the input being typed
-into, `restoreFocus` survives moves, `autofocus` is honoured on inserted
-nodes, and a live `submit` resets the form the way a native submit would.
-The morph is still whole-root: patches are small on the wire, but the DOM
-walk covers the page. Morphing only the subtrees a patch touched is the
-next step, and needs a DOM anchor per component (`data-lsc-i`), which the
-paths already provide.
+**Slot-level patches, memoized instances, subtree morphs.** A render is a
+tree of statics and slots (`wire.ts`); the session keeps the tree the
+browser has and sends only changed slots, statics once per fingerprint,
+lists diffed by `key`, components as nested nodes. The browser merges the
+patch into its copy of the tree and, while merging, records the nodes it
+touched (a string slot changed, a node created or patched, a list
+reordered). Nodes whose HTML is a single element (`e: 1`, sent with the
+statics) are anchored in the DOM with `data-lsc-n="<client path>"`, added
+by the runtime when it generates HTML and never sent; for each touched node
+the runtime walks up to the nearest anchor present in the DOM (new nodes
+have none yet) and morphs that element alone with idiomorph (vendored as a
+string by `scripts/vendor-idiomorph.ts`, no asset pipeline). Only when no
+anchor exists does it morph the root. `ignoreActiveValue` keeps the value
+of the input being typed into, `restoreFocus` survives moves, `autofocus`
+is honoured on inserted nodes, and a live `submit` resets the form the way
+a native submit would.
 
 **No compiler, no bundler.** `jsxImportSource: "effect-lsc"` is the entire
 integration; Bun honours it through `tsconfig` `paths` even inside this repo.
@@ -205,10 +208,12 @@ children of reused instances. The semantic change: a component that reads a
 value outside props, state and watched refs no longer picks up changes by
 accident, which is the same contract as LiveView's assigns.
 
-Still open: morphing only touched subtrees on the client (currently the
-whole root is morphed after every patch, so a 1000-item page still walks
-1000 `<li>` in the browser for a 137-byte patch). It needs a DOM anchor per
-component, which the paths already provide, and does not affect the wire.
+Then subtree morphing in the browser, measured by instrumenting
+`Idiomorph.morph` in the page: toggling a todo morphs its `<li>` and the
+footer, opening the editor morphs the `<li>`, adding or filtering morphs
+the `<section>` that holds the list, since the key order belongs to the
+node whose slot holds the list. Wrapping the list in its own component
+would make that a `<ul>`.
 
 Fragment boundaries, instance boundaries and island boundaries are the same
 thing, which is the reason to keep paths and instances as the core identity.

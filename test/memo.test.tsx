@@ -8,6 +8,8 @@ import type { Child } from "../src/internal/vnode.ts"
 import { diffNode, toHtml } from "../src/internal/wire.ts"
 
 const click = (session: Session, id: string) => dispatch(session, { t: "event", type: "click", id })
+/** The browser adds DOM anchors to its HTML; the server HTML has none. */
+const stripAnchors = (html: string) => html.replace(/ data-lsc-n="[^"]*"/g, "")
 
 describe("memoization", () => {
   it.effect("a component with unchanged props and no dirty state is not re-run", () =>
@@ -140,7 +142,7 @@ describe("memoization", () => {
       })
       const browser = (new Function(`${core}; return { merge: merge, html: html };`) as () => {
         merge: (c: unknown, p: unknown) => unknown
-        html: (t: unknown) => string
+        html: (t: unknown, path: string) => string
       })()
       const session = yield* makeSession
       let tree: unknown = null
@@ -149,7 +151,7 @@ describe("memoization", () => {
           const patch = diffNode(session.tree, server, session.sentStatics)
           session.tree = server
           if (patch !== undefined) tree = browser.merge(tree, JSON.parse(JSON.stringify(patch)))
-          assert.strictEqual(browser.html(tree), toHtml(server))
+          assert.strictEqual(stripAnchors(browser.html(tree, "r")), toHtml(server))
         })
       const a = { id: 1, title: "a", done: false }
       const b = { id: 2, title: "b", done: false }

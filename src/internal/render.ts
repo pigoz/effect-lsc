@@ -78,7 +78,9 @@ const pushSlot = (b: Builder, dyn: Dyn): void => {
   b.s.push("")
 }
 
-const finish = (b: Builder): Node => ({ f: fingerprint(b.s), s: b.s, d: b.d })
+const finish = (b: Builder, e: boolean): Node => ({ f: fingerprint(b.s), s: b.s, d: b.d, e })
+
+const isElement = (child: Child): boolean => isVNode(child) && child._tag === "Element"
 
 export const rootPath = "r"
 
@@ -149,7 +151,7 @@ const renderList = (
       } else {
         const builder = newBuilder()
         yield* renderChild(ctx, builder, child, itemPath)
-        item = finish(builder)
+        item = finish(builder, isElement(child))
       }
       keys.push(listKey)
       items.set(listKey, item)
@@ -244,7 +246,7 @@ const buildComponent = (
     const own = newBuilder()
     yield* renderChildren(ctx, own, output, path, false)
     ctx.current = owner
-    instance.node = finish(own)
+    instance.node = finish(own, isElement(output))
     return instance.node
   })
 
@@ -263,7 +265,7 @@ export const renderTree = (session: Session, child: Child): Effect.Effect<Node, 
       if (ctx.seen.has(path)) continue
       yield* closeInstance(session, path, instance)
     }
-    return finish(root)
+    return finish(root, false)
   })
 
 /**

@@ -17,6 +17,12 @@ export interface Node {
   readonly f: string
   readonly s: ReadonlyArray<string>
   readonly d: ReadonlyArray<Dyn>
+  /**
+   * `true` when the node's HTML is exactly one element, so the browser can
+   * anchor it in the DOM and morph it on its own. A property of the statics,
+   * hence of the fingerprint.
+   */
+  readonly e: boolean
 }
 
 /**
@@ -88,12 +94,13 @@ export const toHtml = (dyn: Dyn): string => {
 /**
  * Patch encoding, JSON friendly:
  * - a string is a slot's new value
- * - `{ f, s?, d: […] }` is a node in full; `{ f?, 0: …, 3: … }` patches the
- *   node the browser already has, with only the changed slots. `s` travels
- *   the first time the session sends a fingerprint.
- * - `{ k?, f?, s?, i? }` is a list: `k` is the key order when it changed,
- *   `f` and `s` the default item fingerprint and its statics when they are
- *   new, `i` the changed or new items by key. An item with the default
+ * - `{ f, s?, e?, d: […] }` is a node in full; `{ f?, 0: …, 3: … }` patches
+ *   the node the browser already has, with only the changed slots. `s`
+ *   travels the first time the session sends a fingerprint, with `e: 1`
+ *   when the node is a single element.
+ * - `{ k?, f?, s?, e?, i? }` is a list: `k` is the key order when it changed,
+ *   `f` and `s` (and `e`) the default item fingerprint and its statics when
+ *   they are new, `i` the changed or new items by key. An item with the default
  *   fingerprint is sent in full as a bare array of slots, and patched with a
  *   node patch without `f`.
  */
@@ -102,6 +109,7 @@ export type Patch = string | NodePatch | ListPatch | ReadonlyArray<Patch>
 export interface NodePatch {
   readonly f?: string
   readonly s?: ReadonlyArray<string>
+  readonly e?: 1
   readonly d?: ReadonlyArray<Patch>
   readonly [slot: number]: Patch
 }
@@ -110,11 +118,18 @@ export interface ListPatch {
   readonly k?: ReadonlyArray<string>
   readonly f?: string
   readonly s?: ReadonlyArray<string>
+  readonly e?: 1
   readonly i?: Readonly<Record<string, Patch>>
 }
 
-type MutableNodePatch = { f?: string; s?: ReadonlyArray<string>; d?: ReadonlyArray<Patch>; [slot: number]: Patch }
-type MutableListPatch = { k?: ReadonlyArray<string>; f?: string; s?: ReadonlyArray<string>; i?: Record<string, Patch> }
+type MutableNodePatch = {
+  f?: string
+  s?: ReadonlyArray<string>
+  e?: 1
+  d?: ReadonlyArray<Patch>
+  [slot: number]: Patch
+}
+type MutableListPatch = { k?: ReadonlyArray<string>; f?: string; s?: ReadonlyArray<string>; e?: 1; i?: Record<string, Patch> }
 
 /** The statics for `f`, the first time the session sends them. */
 const staticsFor = (f: string, s: ReadonlyArray<string>, sent: Set<string>): ReadonlyArray<string> | undefined => {
@@ -128,7 +143,10 @@ const fullSlots = (node: Node, sent: Set<string>): ReadonlyArray<Patch> => node.
 const fullNode = (node: Node, sent: Set<string>): NodePatch => {
   const patch: MutableNodePatch = { f: node.f }
   const s = staticsFor(node.f, node.s, sent)
-  if (s !== undefined) patch.s = s
+  if (s !== undefined) {
+    patch.s = s
+    if (node.e) patch.e = 1
+  }
   patch.d = fullSlots(node, sent)
   return patch
 }
@@ -171,7 +189,10 @@ const diffList = (prev: List | undefined, next: List, sent: Set<string>): ListPa
     patch.f = next.f
     const sample = next.items.get(next.keys.find((key) => next.items.get(key)!.f === next.f)!)!
     const s = staticsFor(next.f, sample.s, sent)
-    if (s !== undefined) patch.s = s
+    if (s !== undefined) {
+      patch.s = s
+      if (sample.e) patch.e = 1
+    }
     changed = true
   }
   if (prev === undefined || !sameKeys(prev.keys, next.keys)) {

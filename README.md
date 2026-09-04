@@ -149,7 +149,7 @@ click            → runtime finds data-lsc-click="r.0.1" → {t:"event", type:"
 server           → looks up the handler at that path → runs the Effect
 state change     → SubscriptionRef change → session marked dirty (sliding queue of 1)
 re-render        → diff against the tree the browser holds → {t:"render", p:{f, 0:{f, 1:"1"}}}
-runtime          → merges the patch, regenerates the HTML, morphs the DOM with idiomorph
+runtime          → merges the patch, regenerates the touched subtrees, morphs them with idiomorph
 ```
 
 A render is a tree of nodes: static strings (tags, attribute names,
@@ -166,7 +166,14 @@ siblings from dynamic children. The first render costs the same bytes as the
 HTML; for 1000 todos, toggling one sends 137 bytes instead of 255 KB, and
 the server re-runs two component bodies, not a thousand: an instance whose
 state, watched refs, descendants and props are unchanged returns the node of
-its previous render, and the diff skips it by reference.
+its previous render, and the diff skips it by reference. In the browser,
+nodes whose HTML is a single element carry an anchor (`data-lsc-n`, added
+by the runtime, never sent), and only the anchored subtrees a patch touched
+are morphed: toggling a todo morphs its `<li>` and the footer.
+
+Two tips that follow from this: a component is the unit of memoization and
+of morphing, so wrap a dynamic list or a large conditional subtree in a
+component of its own, and keep it a single root element.
 
 Every node has a path (`r.0.1`, keyed children `r.0.k42`). Component
 instances live at their path, which is what makes `View.State` persist, and

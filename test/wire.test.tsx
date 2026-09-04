@@ -11,10 +11,13 @@ import { diffNode, type ListPatch, type NodePatch, type Patch, toHtml } from "..
 const client = () => {
   const make = new Function(`${core}; return { merge: merge, html: html, statics: statics };`) as () => {
     merge: (current: unknown, patch: unknown) => unknown
-    html: (tree: unknown) => string
+    html: (tree: unknown, path: string) => string
   }
   return make()
 }
+
+/** The browser adds DOM anchors to its HTML; the server HTML has none. */
+const stripAnchors = (html: string) => html.replace(/ data-lsc-n="[^"]*"/g, "")
 
 /** Renders, diffs against the session's tree, returns the patch (or undefined). */
 const step = (session: Session, child: Child) =>
@@ -33,7 +36,7 @@ const roundTrip = (session: Session, child: Child, actions: ReadonlyArray<Effect
       yield* action
       const { patch, tree: server } = yield* step(session, child)
       if (patch !== undefined) tree = browser.merge(tree, JSON.parse(JSON.stringify(patch)))
-      assert.strictEqual(browser.html(tree), toHtml(server))
+      assert.strictEqual(stripAnchors(browser.html(tree, "r")), toHtml(server))
     }
   })
 
