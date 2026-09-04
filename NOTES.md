@@ -184,6 +184,29 @@ Two steps, both compiler-free:
    back to the fragment from step 1. Lists and conditionals change shape,
    so keep instance boundaries small around them.
 
+A spike of step 2 (a 120-line walk over the VNode tree emitting statics
+and value slots, with LiveView-style nested diffs by fingerprint; verified
+to reproduce `View.render` byte for byte) measured, in bytes on the wire:
+
+| change | full HTML | diff |
+|---|---|---|
+| counter 0 → 1 | 72 | 27 |
+| 20 todos, toggle one | 5363 | 130 |
+| 20 todos, rename one | 5331 | 69 |
+| 20 todos, append one | 5572 | 416 |
+| 20 todos, remove the first | 5073 | 1322 |
+| 20 todos, filter all → active | 3473 | 720 |
+| 0 → 1 todos (shape change) | 614 | 725 |
+
+So the JSX compiler is not on the critical path: the compiled `jsx()` calls
+already expose tags, attribute names and structure; only the literal-vs-
+computed distinction is lost, and that costs comparisons, not bytes. Two
+refinements are visible in the numbers: lists must be diffed by `key`
+(which VNodes already carry) rather than by index, or a removal at the head
+re-sends every shifted item; and repeated items should share their statics
+(LiveView's comprehensions), which shrinks appends. A shape change costs
+more than plain HTML once, then amortises, as in LiveView.
+
 The alternative to step 2 is a server-side VNode diff producing patch ops
 (set text, set attribute, insert, remove, move) that the client applies
 without morphing. More precise, replaces the morph entirely, but needs the
