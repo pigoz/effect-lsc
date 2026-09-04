@@ -138,7 +138,10 @@ the page on an `HttpRouter`:
 - a WebSocket upgrade on the same path runs the live session
 
 Options: `title`, or a `layout: (content) => <html>…</html>` function for a
-custom document (the layout is static, rendered once per page load).
+custom document (the layout is static, rendered once per page load), and
+`origins` for the live session: by default only the page's own origin may
+open it (the `Origin` header must match `Host`); pass a list of origins or
+a predicate to allow others.
 
 Services required by the root component must be provided to the router
 layer, as in the TodoMVC example (`Layer.provide(Todos.layer)`).
@@ -217,5 +220,5 @@ MVP. Working: server render, live sessions with slot-level patches and
 memoized components, local state, shared state via `View.watch`, nested
 keyed components with their own state, forms, lists, many event types,
 cross-session updates. Not yet:
-islands, state recovery on reconnect, session-level authorization. See
+islands, state recovery on reconnect, user-level authorization. See
 NOTES.md.

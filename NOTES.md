@@ -105,8 +105,9 @@ there is an error boundary story.
 - One handler at a time per session, in order. A slow handler delays the
   next event. Concurrency per handler is easy (a `FiberSet`), but ordering
   is the safer default.
-- The WebSocket does no origin check. Same-origin is assumed; production use
-  needs `Origin` validation and a session/auth story at `Server.mount`.
+- The WebSocket upgrade checks `Origin` against `Host` (or the `origins`
+  option). Authentication of the user behind a session is still up to the
+  application, for example in a middleware around `Server.mount`.
 - Rendering the layout also goes through the renderer, with a throwaway
   session, so a layout is never live.
 - Shutdown: Bun's graceful `server.stop()` waits for open WebSockets, and
@@ -284,11 +285,11 @@ event names; closures cover both.
 | navigation and URL (`live_patch`, pushState, `handle_params`) | no multi-page apps without it; the TodoMVC filter does not survive a reload | medium |
 | form serialization on `change` | only the element's value is sent; a multi-field form wants every field | small |
 | loading states (`phx-*-loading`, `disable-with`) | feedback during the round trip; `data-lsc-disconnected` exists | small |
-| origin check and CSRF on the socket | upgrades are accepted from any origin | small, and needed before exposing anything |
 | `connected` flag / single mount | the dead render and the live render run initialisation twice | small |
 | file uploads | chunked over the socket in LiveView | large |
 
-Suggested order: streams, ignored regions and hooks (they unlock islands,
-one of the three open questions), debounce and key filters, origin check.
+Suggested order: ignored regions and hooks (they unlock islands, one of the
+three open questions), debounce and key filters. Streams and the origin
+check are done.
 Then stop and design navigation and reconnection together: both touch the
 session model and should not be bolted on one at a time.

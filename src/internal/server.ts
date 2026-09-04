@@ -29,6 +29,13 @@ export interface MountOptions {
   /** Document title used by the default layout. */
   readonly title?: string | undefined
   /**
+   * Which origins may open the live session. By default only the page's
+   * own origin (the `Origin` header must match the `Host` header). Pass a
+   * list of allowed origins (`https://app.example`) or a predicate.
+   * Requests without an `Origin` header are not browsers and are allowed.
+   */
+  readonly origins?: ReadonlyArray<string> | ((origin: string) => boolean) | undefined
+  /**
    * Wraps the live content in a document. Receives the live root and the
    * runtime script; must return the `<html>` element. The layout is static:
    * it is rendered once per page load and is not part of the live tree.
@@ -119,6 +126,33 @@ const isUpgrade = (request: HttpServerRequest.HttpServerRequest) =>
   request.headers["upgrade"]?.toLowerCase() === "websocket"
 
 /**
+ * Whether a WebSocket upgrade from `origin` may proceed. Browsers always
+ * send `Origin` on upgrades, so a mismatch means another site is trying to
+ * drive the session (cross-site WebSocket hijacking).
+ */
+export const originAllowed = (
+  origin: string | undefined,
+  host: string | undefined,
+  origins: MountOptions["origins"]
+): boolean => {
+  if (origin === undefined) return true
+  if (typeof origins === "function") return origins(origin)
+  if (origins !== undefined) return origins.includes(origin)
+  if (host === undefined) return false
+  try {
+    return new URL(origin).host === host
+  } catch {
+    return false
+  }
+}
+
+const forbidden = (request: HttpServerRequest.HttpServerRequest) =>
+  Effect.as(
+    Effect.logWarning(`effect-lsc: refused WebSocket upgrade from origin ${request.headers["origin"]}`),
+    HttpServerResponse.text("Forbidden", { status: 403 })
+  )
+
+/**
  * Mounts `component` at `path`: `GET path` serves the page, and a WebSocket
  * upgrade on the same path runs the live session.
  *
@@ -138,9 +172,11 @@ export const mount = <E, R>(
   options?: MountOptions
 ): Layer.Layer<never, never, HttpRouter.HttpRouter | HttpRouter.Request.From<"Requires", Exclude<R, Instance | HttpRouter.Provided>>> => {
   const handler = Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
-    isUpgrade(request)
-      ? Effect.flatMap(request.upgrade, (socket) => live(component, socket))
-      : page(component, options)
+    !isUpgrade(request)
+      ? page(component, options)
+      : !originAllowed(request.headers["origin"], request.headers["host"], options?.origins)
+      ? forbidden(request)
+      : Effect.flatMap(request.upgrade, (socket) => live(component, socket))
   ).pipe(
     Effect.catchCause((cause) =>
       Effect.as(
