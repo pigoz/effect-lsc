@@ -54,6 +54,7 @@
   ],
   "scripts": {
     "check": "tsc -p tsconfig.json",
+    "runtime": "bun scripts/build-runtime.ts && bun scripts/vendor-idiomorph.ts",
     "build": "rm -rf dist && vite build && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "counter": "bun examples/counter/index.tsx",

@@ -146,6 +146,12 @@ export const script: string = `${idiomorph}
 (function () {
   var root = document.querySelector("[data-lsc-root]");
   if (!root) return;
+  // The page-facing surface: registries for hooks and islands, and the
+  // morph entry point (wrappable, for instrumentation).
+  var lsc = window.lsc = window.lsc || {};
+  lsc.morph = function (element, markup, options) {
+    return Idiomorph.morph(element, markup, options);
+  };
   ${core}
   var protocol = location.protocol === "https:" ? "wss:" : "ws:";
   var url = protocol + "//" + location.host + location.pathname + location.search;
@@ -286,7 +292,7 @@ export const script: string = `${idiomorph}
     changed = new Set();
     if (morphs === null) {
       anchors = new Map();
-      Idiomorph.morph(root, html(tree, "r"), Object.assign({ morphStyle: "innerHTML" }, morphOptions));
+      lsc.morph(root, html(tree, "r"), Object.assign({ morphStyle: "innerHTML" }, morphOptions));
       return;
     }
     for (var m = 0; m < morphs.length; m++) {
@@ -296,7 +302,7 @@ export const script: string = `${idiomorph}
         covered = n !== m && morphs[n].element !== current.element && morphs[n].element.contains(current.element);
       }
       if (covered || !current.element.isConnected) continue;
-      Idiomorph.morph(current.element, html(current.node, current.path), Object.assign({ morphStyle: "outerHTML" }, morphOptions));
+      lsc.morph(current.element, html(current.node, current.path), Object.assign({ morphStyle: "outerHTML" }, morphOptions));
     }
   }
 

@@ -91,7 +91,13 @@ a native submit would.
 **No compiler, no bundler.** `jsxImportSource: "effect-lsc"` is the entire
 integration; Bun honours it through `tsconfig` `paths` even inside this repo.
 The browser runtime is a string constant so that it needs no asset pipeline
-in any runtime; it is generic and does not change per application.
+in any runtime; it is generic and does not change per application. It is
+written readably in `browser.ts` and served from `runtime.ts`, a committed
+minified copy produced by `scripts/build-runtime.ts` (Bun's minifier), the
+same arrangement as the vendored idiomorph; a test compares the hash of the
+source recorded in the copy with the current source, so it cannot go stale
+unnoticed. The page-facing surface is `window.lsc` (morph entry point, and
+the registries hooks and islands will use).
 
 **Handler errors are logged, not fatal.** A failing handler or render logs
 its `Cause` and the session continues. A crashed process in LiveView would
