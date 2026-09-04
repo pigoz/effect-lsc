@@ -100,16 +100,28 @@ describe("wire", () => {
       const toggled = yield* step(session, <List items={[["c", false], ["a", true], ["b", false]]} />)
       assert.deepStrictEqual(list(node(toggled.patch![0])[0]), { i: { a: { 0: ` class="done"` } } })
 
-      // append: new key order plus the new item as a bare array, no statics
+      // append: an insertion by index plus the new item as a bare array, no statics
       const appended = yield* step(session, <List items={[["c", false], ["a", true], ["b", false], ["d", false]]} />)
       assert.deepStrictEqual(list(node(appended.patch![0])[0]), {
-        k: ["c", "a", "b", "d"],
+        a: [[3, "d"]],
         i: { d: ["", ` data-lsc-click="r.0.kd.0"`, "d"] }
       })
 
-      // remove the head: key order only
+      // remove the head (c): a removal by key only
       const removed = yield* step(session, <List items={[["a", true], ["b", false], ["d", false]]} />)
-      assert.deepStrictEqual(list(node(removed.patch![0])[0]), { k: ["a", "b", "d"] })
+      assert.deepStrictEqual(list(node(removed.patch![0])[0]), { r: ["c"] })
+
+      // remove and insert at once, kept keys in the same order: no full order
+      const mixed = yield* step(session, <List items={[["x", false], ["a", true], ["d", false], ["y", false]]} />)
+      assert.deepStrictEqual(list(node(mixed.patch![0])[0]), {
+        r: ["b"],
+        a: [[0, "x"], [3, "y"]],
+        i: { x: ["", ` data-lsc-click="r.0.kx.0"`, "x"], y: ["", ` data-lsc-click="r.0.ky.0"`, "y"] }
+      })
+
+      // a move: the whole order
+      const moved = yield* step(session, <List items={[["a", true], ["x", false], ["d", false], ["y", false]]} />)
+      assert.deepStrictEqual(list(node(moved.patch![0])[0]), { k: ["a", "x", "d", "y"] })
     }))
 
   it.effect("a shape change re-sends the nested node in full, and only that", () =>

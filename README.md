@@ -171,7 +171,11 @@ state, watched refs, descendants and props are unchanged returns the node of
 its previous render, and the diff skips it by reference. In the browser,
 nodes whose HTML is a single element carry an anchor (`data-lsc-n`, added
 by the runtime, never sent), and only the anchored subtrees a patch touched
-are morphed: toggling a todo morphs its `<li>` and the footer.
+are morphed: toggling a todo morphs its `<li>` and the footer. A list whose
+keys changed sends removals and insertions by key (the whole order only
+when kept items moved) and is reconciled in place: existing elements are
+moved, new ones created, missing ones removed, nothing else is touched.
+Adding a todo morphs only the footer; filtering morphs nothing.
 
 Two tips that follow from this: a component is the unit of memoization and
 of morphing, so wrap a dynamic list or a large conditional subtree in a

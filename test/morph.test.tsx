@@ -16,7 +16,7 @@ const client = () => {
         tree = merge(tree, patch, undefined, null);
         var targets = [];
         collect(tree, "r", null, targets);
-        return { tree: tree, targets: targets.map(function (t) { return t.up === null ? "<root>" : t.path; }) };
+        return { tree: tree, targets: targets.map(function (t) { return t.list ? "list:" + t.path : t.up === null ? "<root>" : t.path; }) };
       },
       html: html,
       rooted: rooted
@@ -76,9 +76,9 @@ describe("subtree morphing", () => {
       assert.deepStrictEqual(yield* apply(<App />), ["<root>"])
       // App's node is anchored: sections, items, footers carry ids in the HTML
       assert.match(browser.html(tree, "r"), /^<section data-lsc-n="r\.0">/)
-      // items appear: keys changed on the list held by the App node -> the App node
+      // items appear: the list is reconciled in place, and the footer text changed
       yield* SubscriptionRef.set(shared, [a, b])
-      assert.deepStrictEqual(yield* apply(<App />), ["r.0"])
+      assert.deepStrictEqual(yield* apply(<App />), ["list:r.0.0", "r.0.1"])
       assert.include(browser.html(tree, "r"), `<li data-lsc-n="r.0.0.k1">`)
       assert.include(browser.html(tree, "r"), `<footer data-lsc-n="r.0.1">`)
       // toggle b: the item's class slot and the footer's text, nothing else
@@ -87,9 +87,12 @@ describe("subtree morphing", () => {
       // local state in a: only that item
       yield* dispatch(session, { t: "event", type: "dblclick", id: "r.0.0.k1.0.0" })
       assert.deepStrictEqual(yield* apply(<App />), ["r.0.0.k1"])
-      // reorder: the App node, which holds the list
+      // reorder: the list alone; the new item of an append is not a morph target
       yield* SubscriptionRef.set(shared, [{ ...b, done: true }, a])
-      assert.deepStrictEqual(yield* apply(<App />), ["r.0"])
+      assert.deepStrictEqual(yield* apply(<App />), ["list:r.0.0"])
+      yield* SubscriptionRef.set(shared, [{ ...b, done: true }, a, { id: 3, title: "c", done: false }])
+      assert.deepStrictEqual(yield* apply(<App />), ["list:r.0.0", "r.0.1"])
+      assert.include(browser.html(tree, "r"), `<li data-lsc-n="r.0.0.k3">`)
       // nothing changed: nothing to morph
       assert.deepStrictEqual(yield* apply(<App />), [])
     }))

@@ -210,10 +210,20 @@ accident, which is the same contract as LiveView's assigns.
 
 Then subtree morphing in the browser, measured by instrumenting
 `Idiomorph.morph` in the page: toggling a todo morphs its `<li>` and the
-footer, opening the editor morphs the `<li>`, adding or filtering morphs
-the `<section>` that holds the list, since the key order belongs to the
-node whose slot holds the list. Wrapping the list in its own component
-would make that a `<ul>`.
+footer, opening the editor morphs the `<li>`.
+
+Then list operations (LiveView's streams, without the developer doing
+anything). On the wire, when the keys kept by both renders stay in the same
+relative order, a list sends removals (`r`) and insertions with their index
+(`a`) instead of the whole key order, which is kept for real reorders. In
+the browser, a list whose keys changed is reconciled in place by key: kept
+elements are moved, new ones built from their HTML, missing ones removed,
+and the container is never morphed; kept elements keep their identity and
+state. When a kept item has no anchor (multi-root item) or the list was
+empty, it falls back to morphing the nearest anchored ancestor. Measured:
+adding a todo morphs only the footer, filtering morphs the two footer links
+whose `selected` class changed and nothing else, the first `<li>` keeps a
+JS property across adds and filters.
 
 Fragment boundaries, instance boundaries and island boundaries are the same
 thing, which is the reason to keep paths and instances as the core identity.
@@ -235,11 +245,10 @@ completes it on the DOM side, the second is framework territory.
 
 ### Morph
 
-1. **Streams / list operations.** A reorder currently resends the key order
-   (O(n) keys) and morphs the element that holds the list. Send list
-   operations by key instead (insert, move, delete), and anchor the element
-   whose only child is a list, so a reorder morphs single items. The `key`
-   the developer already writes is all that is needed; no DOM ids.
+1. ~~Streams / list operations.~~ Done: removals and insertions by key on
+   the wire, in-place reconciliation by key in the browser. A real reorder
+   still sends the whole key order (O(n) keys); a move encoding is possible
+   if it ever matters.
 2. **Ignored regions** (`phx-update="ignore"`): an attribute the morph does
    not touch, so a client library (editor, map, chart) can own a subtree.
    With idiomorph it is a `beforeNodeMorphed` callback returning `false`.

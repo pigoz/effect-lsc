@@ -98,11 +98,13 @@ export const toHtml = (dyn: Dyn): string => {
  *   the node the browser already has, with only the changed slots. `s`
  *   travels the first time the session sends a fingerprint, with `e: 1`
  *   when the node is a single element.
- * - `{ k?, f?, s?, e?, i? }` is a list: `k` is the key order when it changed,
- *   `f` and `s` (and `e`) the default item fingerprint and its statics when
- *   they are new, `i` the changed or new items by key. An item with the default
- *   fingerprint is sent in full as a bare array of slots, and patched with a
- *   node patch without `f`.
+ * - `{ k?, r?, a?, f?, s?, e?, i? }` is a list: `r` lists removed keys and
+ *   `a` inserted `[index, key]` pairs (applied after the removals, in
+ *   ascending index order); when kept keys also moved, `k` carries the whole
+ *   new order instead. `f` and `s` (and `e`) are the default item fingerprint
+ *   and its statics when they are new, `i` the changed or new items by key.
+ *   An item with the default fingerprint is sent in full as a bare array of
+ *   slots, and patched with a node patch without `f`.
  */
 export type Patch = string | NodePatch | ListPatch | ReadonlyArray<Patch>
 
@@ -116,6 +118,8 @@ export interface NodePatch {
 
 export interface ListPatch {
   readonly k?: ReadonlyArray<string>
+  readonly r?: ReadonlyArray<string>
+  readonly a?: ReadonlyArray<readonly [number, string]>
   readonly f?: string
   readonly s?: ReadonlyArray<string>
   readonly e?: 1
@@ -129,7 +133,15 @@ type MutableNodePatch = {
   d?: ReadonlyArray<Patch>
   [slot: number]: Patch
 }
-type MutableListPatch = { k?: ReadonlyArray<string>; f?: string; s?: ReadonlyArray<string>; e?: 1; i?: Record<string, Patch> }
+type MutableListPatch = {
+  k?: ReadonlyArray<string>
+  r?: ReadonlyArray<string>
+  a?: ReadonlyArray<readonly [number, string]>
+  f?: string
+  s?: ReadonlyArray<string>
+  e?: 1
+  i?: Record<string, Patch>
+}
 
 /** The statics for `f`, the first time the session sends them. */
 const staticsFor = (f: string, s: ReadonlyArray<string>, sent: Set<string>): ReadonlyArray<string> | undefined => {
@@ -159,6 +171,36 @@ const fullDyn = (dyn: Dyn, sent: Set<string>): Patch => {
 
 const sameKeys = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean =>
   a.length === b.length && a.every((key, i) => key === b[i])
+
+/**
+ * Removals and insertions that turn `prev` into `next`, when the keys kept
+ * by both stay in the same relative order; `undefined` when some moved.
+ */
+const keyOps = (
+  prev: ReadonlyArray<string>,
+  next: ReadonlyArray<string>
+): { r?: ReadonlyArray<string>; a?: ReadonlyArray<readonly [number, string]> } | undefined => {
+  const nextSet = new Set(next)
+  const prevSet = new Set(prev)
+  const kept: Array<string> = []
+  const removed: Array<string> = []
+  for (const key of prev) (nextSet.has(key) ? kept : removed).push(key)
+  const added: Array<readonly [number, string]> = []
+  let j = 0
+  for (let i = 0; i < next.length; i++) {
+    const key = next[i]!
+    if (!prevSet.has(key)) {
+      added.push([i, key])
+      continue
+    }
+    if (kept[j] !== key) return undefined
+    j++
+  }
+  const ops: { r?: ReadonlyArray<string>; a?: ReadonlyArray<readonly [number, string]> } = {}
+  if (removed.length > 0) ops.r = removed
+  if (added.length > 0) ops.a = added
+  return ops
+}
 
 /** Changed slots of `next` against `prev`, which has the same fingerprint. */
 const changedSlots = (prev: Node, next: Node, sent: Set<string>): MutableNodePatch | undefined => {
@@ -195,8 +237,13 @@ const diffList = (prev: List | undefined, next: List, sent: Set<string>): ListPa
     }
     changed = true
   }
-  if (prev === undefined || !sameKeys(prev.keys, next.keys)) {
+  if (prev === undefined) {
     patch.k = next.keys
+    changed = true
+  } else if (!sameKeys(prev.keys, next.keys)) {
+    const ops = keyOps(prev.keys, next.keys)
+    if (ops === undefined) patch.k = next.keys
+    else Object.assign(patch, ops)
     changed = true
   }
   for (const key of next.keys) {

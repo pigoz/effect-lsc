@@ -4,10 +4,12 @@
  *
  * - opens a WebSocket to the page's own URL and reconnects with backoff
  * - keeps the same statics/slots tree as the server (see `wire.ts`), merges
- *   each `render` patch into it, and morphs only the DOM subtrees the patch
- *   touched: nodes whose HTML is a single element carry an anchor
- *   (`data-lsc-n`, added here, never sent) so they can be located and
- *   morphed on their own with idiomorph; focus and typed input survive
+ *   each `render` patch into it, and updates only what the patch touched:
+ *   nodes whose HTML is a single element carry an anchor (`data-lsc-n`,
+ *   added here, never sent) so they can be located and morphed on their
+ *   own with idiomorph, and a list whose keys changed is reconciled in
+ *   place by key (existing elements are moved, new ones created, missing
+ *   ones removed); focus and typed input survive
  * - delegates DOM events to elements carrying `data-lsc-<event>` and sends
  *   the handler id plus a small payload (value, checked, key, form fields)
  */
@@ -40,25 +42,48 @@ export const core: string = `
     return node;
   }
 
+  // The new key order of a list, from removals and insertions.
+  function applyKeyOps(keys, removed, added) {
+    var result = keys;
+    if (removed) {
+      var gone = Object.create(null);
+      for (var r = 0; r < removed.length; r++) gone[removed[r]] = true;
+      result = [];
+      for (var i = 0; i < keys.length; i++) if (!gone[keys[i]]) result.push(keys[i]);
+    } else {
+      result = keys.slice();
+    }
+    if (added) {
+      for (var a = 0; a < added.length; a++) result.splice(added[a][0], 0, added[a][1]);
+    }
+    return result;
+  }
+
   // Merges a patch into the current value, recording which nodes changed.
   // Inside a list, an item without its own fingerprint uses the list's
   // default one; \`owner\` is the node whose slot holds the value.
   function merge(current, patch, defaultF, owner) {
     if (typeof patch === "string") return patch;
     if (Array.isArray(patch)) return fresh(defaultF, patch);
-    if (patch.k !== undefined || patch.i !== undefined) {
+    if (patch.k !== undefined || patch.r !== undefined || patch.a !== undefined || patch.i !== undefined) {
       var list = current && current.items ? current : { f: "", keys: [], items: Object.create(null) };
       var listF = patch.f !== undefined ? patch.f : list.f;
       learn(listF, patch);
-      var keys = patch.k || list.keys;
-      if (patch.k !== undefined && owner) changed.add(owner);
+      var reordered = patch.k !== undefined || patch.r !== undefined || patch.a !== undefined;
+      var keys = patch.k !== undefined ? patch.k : reordered ? applyKeyOps(list.keys, patch.r, patch.a) : list.keys;
       var items = Object.create(null);
       for (var i = 0; i < keys.length; i++) {
         var k = keys[i];
         var itemPatch = patch.i && hasOwn.call(patch.i, k) ? patch.i[k] : undefined;
         items[k] = itemPatch === undefined ? list.items[k] : merge(list.items[k], itemPatch, listF, owner);
+        // a new item of a reordered list is inserted whole by the list
+        // reconciliation, not morphed
+        if (reordered && !(k in list.items)) changed.delete(items[k]);
       }
-      return { f: listF, keys: keys, items: items };
+      var result = { f: listF, keys: keys, items: items };
+      // remembered until the DOM is reconciled
+      if (reordered && current && current.items) result.prev = list;
+      return result;
     }
     var f = patch.f !== undefined ? patch.f : defaultF;
     learn(f, patch);
@@ -95,8 +120,9 @@ export const core: string = `
     return opening.replace(/^(<[A-Za-z][^\\s/>]*)/, "$1 data-lsc-n=\\"" + path.replace(/"/g, "&quot;") + "\\"");
   }
 
-  // The subtrees to morph after a merge: for each changed node, the nearest
-  // anchored ancestor-or-self. Descendants of a target are covered by it.
+  // The work to do after a merge: for each changed node, the nearest anchored
+  // ancestor-or-self to morph; for each list whose keys changed, a
+  // reconciliation. Descendants of a morph target are covered by it.
   function collect(node, path, anchorDesc, targets) {
     var self = rooted[node.f] ? { node: node, path: path, up: anchorDesc } : anchorDesc;
     if (!self) self = { node: node, path: path, up: null };
@@ -108,6 +134,7 @@ export const core: string = `
       var v = node.d[i];
       if (typeof v === "string") continue;
       if (v.items) {
+        if (v.prev) targets.push({ list: v, path: path + "." + i, up: self });
         for (var j = 0; j < v.keys.length; j++) {
           var k = v.keys[j];
           collect(v.items[k], path + "." + i + ".k" + k, self, targets);
@@ -156,29 +183,92 @@ export const script: string = `${idiomorph}
     callbacks: { afterNodeAdded: autofocus }
   };
 
+  function find(path) {
+    return root.querySelector('[data-lsc-n="' + CSS.escape(path) + '"]');
+  }
+
+  // Builds the element for a single-element node, or null.
+  function build(node, path) {
+    if (!rooted[node.f]) return null;
+    var template = document.createElement("template");
+    template.innerHTML = html(node, path);
+    var content = template.content;
+    return content.childNodes.length === 1 && content.firstChild.nodeType === 1 ? content.firstChild : null;
+  }
+
+  // Reconciles a list in place by key: moves kept elements, inserts new
+  // ones, removes the rest. Returns false when it cannot, in which case the
+  // caller morphs the nearest anchored ancestor instead.
+  function reconcile(target) {
+    var previous = target.list.prev;
+    var next = target.list;
+    if (previous.keys.length === 0) return false;
+    var elements = Object.create(null);
+    var parent = null;
+    for (var i = 0; i < previous.keys.length; i++) {
+      var k = previous.keys[i];
+      var element = find(target.path + ".k" + k);
+      if (!element || (parent && element.parentNode !== parent)) return false;
+      parent = element.parentNode;
+      elements[k] = element;
+    }
+    var created = [];
+    for (var j = 0; j < next.keys.length; j++) {
+      var key = next.keys[j];
+      if (elements[key]) continue;
+      var built = build(next.items[key], target.path + ".k" + key);
+      if (!built) return false;
+      elements[key] = built;
+      created.push(built);
+    }
+    var cursor = elements[previous.keys[0]];
+    for (var n = 0; n < next.keys.length; n++) {
+      var node = elements[next.keys[n]];
+      if (node === cursor) cursor = cursor.nextSibling;
+      else parent.insertBefore(node, cursor);
+    }
+    for (var m = 0; m < previous.keys.length; m++) {
+      var old = previous.keys[m];
+      if (!(old in next.items)) elements[old].remove();
+    }
+    for (var c = 0; c < created.length; c++) autofocus(created[c]);
+    return true;
+  }
+
   function apply(patch) {
     changed = new Set();
     tree = merge(tree, patch, undefined, null);
     var targets = [];
     collect(tree, "r", null, targets);
-    var morphs = [];
+    var nodes = [];
     for (var i = 0; i < targets.length; i++) {
       var t = targets[i];
+      if (t.list) {
+        var done = reconcile(t);
+        delete t.list.prev;
+        if (!done) nodes.push(t.up);
+      } else {
+        nodes.push(t);
+      }
+    }
+    var morphs = [];
+    for (var j = 0; j < nodes.length; j++) {
+      var target = nodes[j];
       var element = null;
       // walk up until an anchor exists in the DOM; new nodes have none yet
-      while (t.up !== null) {
-        element = root.querySelector('[data-lsc-n="' + CSS.escape(t.path) + '"]');
+      while (target.up !== null) {
+        element = find(target.path);
         if (element) break;
-        t = t.up;
+        target = target.up;
       }
-      if (t.up === null) {
-        morphs = [null];
+      if (target.up === null) {
+        morphs = null;
         break;
       }
-      morphs.push({ element: element, node: t.node, path: t.path });
+      morphs.push({ element: element, node: target.node, path: target.path });
     }
     changed = new Set();
-    if (morphs.length === 1 && morphs[0] === null) {
+    if (morphs === null) {
       Idiomorph.morph(root, html(tree, "r"), Object.assign({ morphStyle: "innerHTML" }, morphOptions));
       return;
     }
