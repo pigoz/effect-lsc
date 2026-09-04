@@ -6,7 +6,7 @@ Phoenix LiveView, built on [Effect](https://effect.website) v4 and plain JSX.
 - components execute on the server, as Effects
 - state lives on the server
 - JSX describes the UI; event callbacks stay on the server
-- the browser runs one small, generic runtime (about 13 KB inlined, 9 of which are [idiomorph](https://github.com/bigskysoftware/idiomorph))
+- the browser runs one small, generic runtime (about 21 KB inlined and unminified, 6.8 KB gzipped, of which 9.5 KB are [idiomorph](https://github.com/bigskysoftware/idiomorph))
 - events travel to the server over a WebSocket and come back as DOM updates
 - no React, no compiler plugin, no bundler integration: normal TypeScript JSX
   compilation is enough
