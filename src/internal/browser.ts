@@ -42,20 +42,16 @@ export const core: string = `
     return node;
   }
 
-  // The new key order of a list, from removals and insertions.
-  function applyKeyOps(keys, removed, added) {
-    var result = keys;
-    if (removed) {
-      var gone = Object.create(null);
-      for (var r = 0; r < removed.length; r++) gone[removed[r]] = true;
-      result = [];
-      for (var i = 0; i < keys.length; i++) if (!gone[keys[i]]) result.push(keys[i]);
-    } else {
-      result = keys.slice();
-    }
-    if (added) {
-      for (var a = 0; a < added.length; a++) result.splice(added[a][0], 0, added[a][1]);
-    }
+  // The new key order of a list: drop removed and moved keys, then place
+  // added and moved keys at their final index, ascending.
+  function applyKeyOps(keys, removed, moved, added) {
+    var gone = Object.create(null);
+    var g;
+    if (removed) for (g = 0; g < removed.length; g++) gone[removed[g]] = true;
+    if (moved) for (g = 0; g < moved.length; g++) gone[moved[g]] = true;
+    var result = [];
+    for (var i = 0; i < keys.length; i++) if (!gone[keys[i]]) result.push(keys[i]);
+    if (added) for (var a = 0; a < added.length; a++) result.splice(added[a][0], 0, added[a][1]);
     return result;
   }
 
@@ -65,12 +61,12 @@ export const core: string = `
   function merge(current, patch, defaultF, owner) {
     if (typeof patch === "string") return patch;
     if (Array.isArray(patch)) return fresh(defaultF, patch);
-    if (patch.k !== undefined || patch.r !== undefined || patch.a !== undefined || patch.i !== undefined) {
+    if (patch.k !== undefined || patch.r !== undefined || patch.m !== undefined || patch.a !== undefined || patch.i !== undefined) {
       var list = current && current.items ? current : { f: "", keys: [], items: Object.create(null) };
       var listF = patch.f !== undefined ? patch.f : list.f;
       learn(listF, patch);
-      var reordered = patch.k !== undefined || patch.r !== undefined || patch.a !== undefined;
-      var keys = patch.k !== undefined ? patch.k : reordered ? applyKeyOps(list.keys, patch.r, patch.a) : list.keys;
+      var reordered = patch.k !== undefined || patch.r !== undefined || patch.m !== undefined || patch.a !== undefined;
+      var keys = patch.k !== undefined ? patch.k : reordered ? applyKeyOps(list.keys, patch.r, patch.m, patch.a) : list.keys;
       var items = Object.create(null);
       for (var i = 0; i < keys.length; i++) {
         var k = keys[i];

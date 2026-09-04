@@ -87,7 +87,7 @@ describe("subtree morphing", () => {
       // local state in a: only that item
       yield* dispatch(session, { t: "event", type: "dblclick", id: "r.0.0.k1.0.0" })
       assert.deepStrictEqual(yield* apply(<App />), ["r.0.0.k1"])
-      // reorder: the list alone; the new item of an append is not a morph target
+      // reorder (a move): the list alone; the new item of an append is not a morph target
       yield* shared.set([{ ...b, done: true }, a])
       assert.deepStrictEqual(yield* apply(<App />), ["list:r.0.0"])
       yield* shared.set([{ ...b, done: true }, a, { id: 3, title: "c", done: false }])

@@ -98,10 +98,10 @@ export const toHtml = (dyn: Dyn): string => {
  *   the node the browser already has, with only the changed slots. `s`
  *   travels the first time the session sends a fingerprint, with `e: 1`
  *   when the node is a single element.
- * - `{ k?, r?, a?, f?, s?, e?, i? }` is a list: `r` lists removed keys and
- *   `a` inserted `[index, key]` pairs (applied after the removals, in
- *   ascending index order); when kept keys also moved, `k` carries the whole
- *   new order instead. `f` and `s` (and `e`) are the default item fingerprint
+ * - `{ k?, r?, m?, a?, f?, s?, e?, i? }` is a list: `r` lists removed keys,
+ *   `m` moved keys, and `a` the `[index, key]` placements of added and moved
+ *   keys in the new order (remove `r` and `m`, then place `a` in ascending
+ *   index order); `k` carries the whole new order when that is shorter. `f` and `s` (and `e`) are the default item fingerprint
  *   and its statics when they are new, `i` the changed or new items by key.
  *   An item with the default fingerprint is sent in full as a bare array of
  *   slots, and patched with a node patch without `f`.
@@ -119,6 +119,7 @@ export interface NodePatch {
 export interface ListPatch {
   readonly k?: ReadonlyArray<string>
   readonly r?: ReadonlyArray<string>
+  readonly m?: ReadonlyArray<string>
   readonly a?: ReadonlyArray<readonly [number, string]>
   readonly f?: string
   readonly s?: ReadonlyArray<string>
@@ -136,6 +137,7 @@ type MutableNodePatch = {
 type MutableListPatch = {
   k?: ReadonlyArray<string>
   r?: ReadonlyArray<string>
+  m?: ReadonlyArray<string>
   a?: ReadonlyArray<readonly [number, string]>
   f?: string
   s?: ReadonlyArray<string>
@@ -172,33 +174,76 @@ const fullDyn = (dyn: Dyn, sent: Set<string>): Patch => {
 const sameKeys = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean =>
   a.length === b.length && a.every((key, i) => key === b[i])
 
+/** Indices, in `order`, of a longest increasing subsequence of `order`. */
+const longestIncreasing = (order: ReadonlyArray<number>): Set<number> => {
+  const tails: Array<number> = []
+  const previous = new Array<number>(order.length)
+  for (let i = 0; i < order.length; i++) {
+    const value = order[i]!
+    let lo = 0
+    let hi = tails.length
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      if (order[tails[mid]!]! < value) lo = mid + 1
+      else hi = mid
+    }
+    previous[i] = lo > 0 ? tails[lo - 1]! : -1
+    tails[lo] = i
+  }
+  const kept = new Set<number>()
+  for (let i = tails.length > 0 ? tails[tails.length - 1]! : -1; i !== -1; i = previous[i]!) kept.add(i)
+  return kept
+}
+
 /**
- * Removals and insertions that turn `prev` into `next`, when the keys kept
- * by both stay in the same relative order; `undefined` when some moved.
+ * The operations that turn `prev` into `next`: removed keys, moved keys
+ * (the fewest possible, via a longest increasing subsequence of the kept
+ * keys), and `[index, key]` placements for added and moved keys in the new
+ * order. `undefined` when the whole order is shorter to send.
  */
 const keyOps = (
   prev: ReadonlyArray<string>,
   next: ReadonlyArray<string>
-): { r?: ReadonlyArray<string>; a?: ReadonlyArray<readonly [number, string]> } | undefined => {
+): { r?: ReadonlyArray<string>; m?: ReadonlyArray<string>; a?: ReadonlyArray<readonly [number, string]> } | undefined => {
   const nextSet = new Set(next)
-  const prevSet = new Set(prev)
-  const kept: Array<string> = []
+  const prevIndex = new Map<string, number>()
   const removed: Array<string> = []
-  for (const key of prev) (nextSet.has(key) ? kept : removed).push(key)
-  const added: Array<readonly [number, string]> = []
-  let j = 0
+  for (let i = 0; i < prev.length; i++) {
+    const key = prev[i]!
+    if (nextSet.has(key)) prevIndex.set(key, i)
+    else removed.push(key)
+  }
+  // kept keys in the new order, as their old indices
+  const keptOrder: Array<number> = []
+  const keptAt: Array<number> = []
+  for (let i = 0; i < next.length; i++) {
+    const at = prevIndex.get(next[i]!)
+    if (at !== undefined) {
+      keptOrder.push(at)
+      keptAt.push(i)
+    }
+  }
+  const stay = longestIncreasing(keptOrder)
+  const moved: Array<string> = []
+  const placed: Array<readonly [number, string]> = []
+  let k = 0
   for (let i = 0; i < next.length; i++) {
     const key = next[i]!
-    if (!prevSet.has(key)) {
-      added.push([i, key])
+    if (!prevIndex.has(key)) {
+      placed.push([i, key])
       continue
     }
-    if (kept[j] !== key) return undefined
-    j++
+    if (!stay.has(k)) {
+      moved.push(key)
+      placed.push([i, key])
+    }
+    k++
   }
-  const ops: { r?: ReadonlyArray<string>; a?: ReadonlyArray<readonly [number, string]> } = {}
+  if (removed.length + moved.length + placed.length >= next.length) return undefined
+  const ops: { r?: ReadonlyArray<string>; m?: ReadonlyArray<string>; a?: ReadonlyArray<readonly [number, string]> } = {}
   if (removed.length > 0) ops.r = removed
-  if (added.length > 0) ops.a = added
+  if (moved.length > 0) ops.m = moved
+  if (placed.length > 0) ops.a = placed
   return ops
 }
 

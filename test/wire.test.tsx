@@ -92,9 +92,9 @@ describe("wire", () => {
       assert.deepStrictEqual(l0.i!["a"], ["", ` data-lsc-click="r.0.ka.0"`, "a"])
       assert.deepStrictEqual(l0.i!["b"], ["", ` data-lsc-click="r.0.kb.0"`, "b"])
 
-      // reorder: key order only, no item patches
+      // reorder: one move, no item patches
       const reordered = yield* step(session, <List items={[["c", false], ["a", false], ["b", false]]} />)
-      assert.deepStrictEqual(list(node(reordered.patch![0])[0]), { k: ["c", "a", "b"] })
+      assert.deepStrictEqual(list(node(reordered.patch![0])[0]), { m: ["c"], a: [[0, "c"]] })
 
       // toggle one: that item's changed slot only, no key order, no fingerprint
       const toggled = yield* step(session, <List items={[["c", false], ["a", true], ["b", false]]} />)
@@ -119,9 +119,17 @@ describe("wire", () => {
         i: { x: ["", ` data-lsc-click="r.0.kx.0"`, "x"], y: ["", ` data-lsc-click="r.0.ky.0"`, "y"] }
       })
 
-      // a move: the whole order
+      // a single move: the moved key and its new position
       const moved = yield* step(session, <List items={[["a", true], ["x", false], ["d", false], ["y", false]]} />)
-      assert.deepStrictEqual(list(node(moved.patch![0])[0]), { k: ["a", "x", "d", "y"] })
+      assert.deepStrictEqual(list(node(moved.patch![0])[0]), { m: ["a"], a: [[0, "a"]] })
+
+      // moving the head to the tail is one move, not three
+      const rotated = yield* step(session, <List items={[["x", false], ["d", false], ["y", false], ["a", true]]} />)
+      assert.deepStrictEqual(list(node(rotated.patch![0])[0]), { m: ["a"], a: [[3, "a"]] })
+
+      // a full reverse: the whole order is shorter
+      const reversed = yield* step(session, <List items={[["a", true], ["y", false], ["d", false], ["x", false]]} />)
+      assert.deepStrictEqual(list(node(reversed.patch![0])[0]), { k: ["a", "y", "d", "x"] })
     }))
 
   it.effect("a shape change re-sends the nested node in full, and only that", () =>
