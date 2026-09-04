@@ -3,6 +3,7 @@
  * Untrusted input (browser → server) is validated with `Schema`.
  */
 import * as Schema from "effect/Schema"
+import type { NodePatch } from "./wire.ts"
 
 export const ClientEvent = Schema.Struct({
   t: Schema.Literal("event"),
@@ -20,6 +21,10 @@ export type ClientMessage = typeof ClientMessage.Type
 
 export const decodeClientMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(ClientMessage))
 
-export type ServerMessage = { readonly t: "render"; readonly html: string }
+/**
+ * `render` carries a patch against the tree the browser holds. The first one
+ * is complete, since the browser starts empty.
+ */
+export type ServerMessage = { readonly t: "render"; readonly p: NodePatch }
 
 export const encodeServerMessage = (message: ServerMessage): string => JSON.stringify(message)

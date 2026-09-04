@@ -58,14 +58,19 @@ computations run twice, and a component that reads the request could see two
 different contexts. LiveView has the same shape (`connected?/1`); a
 `View.connected` flag or a mount-once hook would be the fix.
 
-**Full HTML per render, index-based morph.** The server sends the whole page
-fragment every time and the runtime morphs by child index. Focused text
-inputs keep the user's value (server attribute changes to `value` on the
-element being typed into are ignored), checkboxes/selects mirror the
-server, `autofocus` is honoured on inserted nodes, and a live `submit`
-resets the form the way a native submit would have. No keys on the client,
-so reordering a list re-patches nodes rather than moving them. Good enough to
-prove the model; a keyed morph is a contained upgrade.
+**Slot-level patches, idiomorph on the client.** A render is a tree of
+statics and slots (`wire.ts`); the session keeps the tree the browser has and
+sends only changed slots, statics once per fingerprint, lists diffed by
+`key`, components as nested nodes. The browser merges the patch into its
+copy of the tree, regenerates the HTML and morphs it into the page with
+idiomorph (vendored as a string by `scripts/vendor-idiomorph.ts`, no asset
+pipeline). `ignoreActiveValue` keeps the value of the input being typed
+into, `restoreFocus` survives moves, `autofocus` is honoured on inserted
+nodes, and a live `submit` resets the form the way a native submit would.
+The morph is still whole-root: patches are small on the wire, but the DOM
+walk covers the page. Morphing only the subtrees a patch touched is the
+next step, and needs a DOM anchor per component (`data-lsc-i`), which the
+paths already provide.
 
 **No compiler, no bundler.** `jsxImportSource: "effect-lsc"` is the entire
 integration; Bun honours it through `tsconfig` `paths` even inside this repo.
@@ -152,66 +157,32 @@ already an Elm program. The MVP does not commit; the primitive supports both.
 
 ### Fragments, not whole pages
 
-Sending the whole page on every render is an MVP shortcut. The wire format
-must become fragments, and the current design was shaped so that this is an
-evolution of `render.ts` and the protocol, not a rewrite:
+Done: the wire carries slot-level patches (see `wire.ts` and the README).
+What the implementation settled:
 
-- every node already has a stable path, and component instances live at
-  their path; a fragment is "the output of the instance at path P"
-- the browser runtime patches by morphing, so it can morph a fragment into
-  the subtree at P exactly as it morphs the whole root today
-- the protocol is message based; `{t: "render", html}` becomes
-  `{t: "patch", fragments: [{path, html}]}` without touching anything else
+- children arrays are lists of wrapper nodes keyed by `key` or index, so a
+  conditional child (`{cond && <X/>}`) changes only its own slot, and a
+  reorder sends only the key order
+- components are nested nodes; elements are inlined into their parent's
+  statics, so a component is the unit of shape (fingerprint) and of identity
+- statics are deduplicated per session by fingerprint, which covers
+  repeated list items (LiveView's comprehensions) and any repeated shape
+- a shape change costs the nested node in full, once
 
-Two steps, both compiler-free:
+Measured with a 120-line spike before implementing (bytes on the wire):
 
-1. **Per-instance dirtiness.** `Instance.invalidate` marks the instance
-   dirty instead of the whole session. A render pass re-renders only dirty
-   instances top-down (descendants of a dirty ancestor are covered by it),
-   compares each output with the cached previous one, and sends only the
-   fragments that changed. Children whose props are unchanged and are not
-   dirty can reuse their cached output (the LiveComponent `update`
-   optimisation). This needs components to have a single root element, or
-   comment anchors around multi-root output, so the client can find the
-   subtree.
-2. **Statics and dynamics at runtime.** LiveView's diffs come from its
-   template compiler, which we deliberately do not have. But the renderer
-   walks the VNode tree, so instead of a string it can emit a shape (tags,
-   attribute names, child structure) plus a list of values (text and
-   attribute values). The client caches the shape per fingerprint; while
-   the shape of an instance is unchanged, a render sends only the values
-   that differ by index, like LiveView's `{"0": "1"}`. A shape change falls
-   back to the fragment from step 1. Lists and conditionals change shape,
-   so keep instance boundaries small around them.
-
-A spike of step 2 (a 120-line walk over the VNode tree emitting statics
-and value slots, with LiveView-style nested diffs by fingerprint; verified
-to reproduce `View.render` byte for byte) measured, in bytes on the wire:
-
-| change | full HTML | diff |
+| change | full HTML | patch |
 |---|---|---|
 | counter 0 → 1 | 72 | 27 |
 | 20 todos, toggle one | 5363 | 130 |
 | 20 todos, rename one | 5331 | 69 |
 | 20 todos, append one | 5572 | 416 |
-| 20 todos, remove the first | 5073 | 1322 |
-| 20 todos, filter all → active | 3473 | 720 |
 | 0 → 1 todos (shape change) | 614 | 725 |
 
-So the JSX compiler is not on the critical path: the compiled `jsx()` calls
-already expose tags, attribute names and structure; only the literal-vs-
-computed distinction is lost, and that costs comparisons, not bytes. Two
-refinements are visible in the numbers: lists must be diffed by `key`
-(which VNodes already carry) rather than by index, or a removal at the head
-re-sends every shifted item; and repeated items should share their statics
-(LiveView's comprehensions), which shrinks appends. A shape change costs
-more than plain HTML once, then amortises, as in LiveView.
-
-The alternative to step 2 is a server-side VNode diff producing patch ops
-(set text, set attribute, insert, remove, move) that the client applies
-without morphing. More precise, replaces the morph entirely, but needs the
-previous tree per session and a keyed diff algorithm. Step 2 reuses the
-morph and maps onto a proven model; try it first.
+Still open: morphing only touched subtrees on the client (currently the
+whole root is morphed after every patch), and per-instance dirtiness on the
+server so that a change deep in the tree does not re-run every component
+body. Neither affects the wire format.
 
 Fragment boundaries, instance boundaries and island boundaries are the same
 thing, which is the reason to keep paths and instances as the core identity.

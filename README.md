@@ -6,7 +6,7 @@ Phoenix LiveView, built on [Effect](https://effect.website) v4 and plain JSX.
 - components execute on the server, as Effects
 - state lives on the server
 - JSX describes the UI; event callbacks stay on the server
-- the browser runs one small, generic runtime (about 5 KB of plain JS, inlined)
+- the browser runs one small, generic runtime (about 13 KB inlined, 9 of which are [idiomorph](https://github.com/bigskysoftware/idiomorph))
 - events travel to the server over a WebSocket and come back as DOM updates
 - no React, no compiler plugin, no bundler integration: normal TypeScript JSX
   compilation is enough
@@ -138,13 +138,24 @@ layer, as in the TodoMVC example (`Layer.provide(Todos.layer)`).
 
 ```
 GET /            → render Component with fresh state → HTML document + runtime
-WebSocket /      → new session: render again, push {t:"render", html}
+WebSocket /      → new session: render again, send the tree {t:"render", p:{f, s, 0:…}}
 click            → runtime finds data-lsc-click="r.0.1" → {t:"event", type:"click", id:"r.0.1"}
 server           → looks up the handler at that path → runs the Effect
 state change     → SubscriptionRef change → session marked dirty (sliding queue of 1)
-re-render        → full HTML for the page → {t:"render", html}
-runtime          → morphs the DOM in place (focus and typed input survive)
+re-render        → diff against the tree the browser holds → {t:"render", p:{f, 0:{f, 1:"1"}}}
+runtime          → merges the patch, regenerates the HTML, morphs the DOM with idiomorph
 ```
+
+A render is a tree of nodes: static strings (tags, attribute names,
+structure) interleaved with slots (text, attribute values, handler ids,
+nested nodes, lists). Statics are identified by a fingerprint and travel once
+per session; after that only slots whose value changed are sent. Lists are
+diffed by `key`, so a reorder sends the new key order and nothing else, and
+repeated items share their statics. Components are nested nodes, so a
+conditional component costs only its own slot. This is LiveView's
+statics/dynamics split, derived from the VNode tree at runtime instead of by
+a template compiler: the compiled `jsx()` calls already expose the structure.
+For 20 todos, toggling one sends about 130 bytes instead of 5 KB of HTML.
 
 Every node has a path (`r.0.1`, keyed children `r.0.k42`). Component
 instances live at their path, which is what makes `View.State` persist, and
@@ -177,8 +188,8 @@ bun run build   # vite (ESM) + tsc (declarations) into dist/
 
 ## Status
 
-MVP. Working: server render, live sessions, local state, shared state via
-`View.watch`, nested keyed components with their own state, forms, lists,
-many event types, cross-session updates. Not yet: islands, keyed DOM
-morphing, state recovery on reconnect, session-level authorization. See
+MVP. Working: server render, live sessions with slot-level patches, local
+state, shared state via `View.watch`, nested keyed components with their own
+state, forms, lists, many event types, cross-session updates. Not yet:
+islands, state recovery on reconnect, session-level authorization. See
 NOTES.md.

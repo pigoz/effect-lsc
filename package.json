@@ -70,6 +70,7 @@
     "@effect/vitest": "4.0.0-rc.112",
     "@types/bun": "^1.4.0",
     "effect": "4.0.0-rc.112",
+    "idiomorph": "0.7.4",
     "typescript": "7.0.2",
     "vite": "^8.2.2",
     "vitest": "4.1.11"

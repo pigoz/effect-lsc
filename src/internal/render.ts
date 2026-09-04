@@ -1,5 +1,5 @@
 /**
- * Renders a `Child` tree to an HTML string for a session.
+ * Renders a `Child` tree into a wire `Node` for a session.
  *
  * Every node has a path (`r.0.2.k42.1`): array indices, or `k<key>` for keyed
  * children. Paths are stable across renders for the same tree position, and
@@ -9,6 +9,11 @@
  * - event handlers are registered under their element path, which is what
  *   the browser sends back; a click on an already re-rendered element still
  *   maps to the current handler at that position
+ *
+ * Elements are written inline into the current node as statics (tag,
+ * attribute names) and slots (attribute values, text, handler ids). Arrays
+ * become lists of nodes keyed by `key` or index. Components become nested
+ * nodes, so a component is a unit of both identity and patching.
  */
 import * as Effect from "effect/Effect"
 import * as Queue from "effect/Queue"
@@ -20,13 +25,32 @@ import type { Session } from "./session.ts"
 import { handlerKey } from "./session.ts"
 import type { Child, VNode } from "./vnode.ts"
 import { isVNode } from "./vnode.ts"
+import type { Dyn, Node } from "./wire.ts"
+import { fingerprint, toHtml } from "./wire.ts"
 
 interface RenderContext {
   readonly session: Session
   readonly handlers: Map<string, Events.Handler<any>>
   readonly seen: Set<string>
-  readonly out: Array<string>
 }
+
+interface Builder {
+  readonly s: Array<string>
+  readonly d: Array<Dyn>
+}
+
+const newBuilder = (): Builder => ({ s: [""], d: [] })
+
+const pushStatic = (b: Builder, text: string): void => {
+  b.s[b.s.length - 1] += text
+}
+
+const pushSlot = (b: Builder, dyn: Dyn): void => {
+  b.d.push(dyn)
+  b.s.push("")
+}
+
+const finish = (b: Builder): Node => ({ f: fingerprint(b.s), s: b.s, d: b.d })
 
 export const rootPath = "r"
 
@@ -39,76 +63,96 @@ const keyOf = (child: Child): string | undefined => isVNode(child) && child._tag
  * Renders the children of a node at `path`. Arrays index their items; a
  * single child gets index 0, so a child never shares its parent's path.
  */
-const renderChildren = (ctx: RenderContext, children: Child, path: string): Effect.Effect<void, unknown> =>
+const renderChildren = (ctx: RenderContext, b: Builder, children: Child, path: string): Effect.Effect<void, unknown> =>
   Array.isArray(children)
-    ? renderChild(ctx, children, path)
-    : renderChild(ctx, children, childPath(path, 0, keyOf(children)))
+    ? renderList(ctx, b, children, path)
+    : renderChild(ctx, b, children, childPath(path, 0, keyOf(children)))
 
-const renderChild = (ctx: RenderContext, child: Child, path: string): Effect.Effect<void, unknown> =>
+const renderChild = (ctx: RenderContext, b: Builder, child: Child, path: string): Effect.Effect<void, unknown> =>
   Effect.suspend(() => {
-    if (child === null || child === undefined || typeof child === "boolean") return Effect.void
+    if (child === null || child === undefined || typeof child === "boolean") {
+      pushSlot(b, "")
+      return Effect.void
+    }
     if (typeof child === "string") {
-      ctx.out.push(escapeText(child))
+      pushSlot(b, escapeText(child))
       return Effect.void
     }
     if (typeof child === "number") {
-      ctx.out.push(String(child))
+      pushSlot(b, String(child))
       return Effect.void
     }
-    if (Array.isArray(child)) {
-      return Effect.forEach(
-        child as ReadonlyArray<Child>,
-        (item, index) => renderChild(ctx, item, childPath(path, index, keyOf(item))),
-        { discard: true }
-      )
-    }
-    if (isVNode(child)) return renderVNode(ctx, child, path)
+    if (Array.isArray(child)) return renderList(ctx, b, child, path)
+    if (isVNode(child)) return renderVNode(ctx, b, child, path)
     return Effect.die(new TypeError(`effect-lsc: cannot render value of type ${typeof child}`))
   })
 
-const renderVNode = (ctx: RenderContext, node: VNode, path: string): Effect.Effect<void, unknown> => {
+const renderList = (
+  ctx: RenderContext,
+  b: Builder,
+  children: ReadonlyArray<Child>,
+  path: string
+): Effect.Effect<void, unknown> =>
+  Effect.gen(function*() {
+    const keys: Array<string> = []
+    const items = new Map<string, Node>()
+    for (let index = 0; index < children.length; index++) {
+      const child = children[index]!
+      const key = keyOf(child)
+      let listKey = key ?? String(index)
+      while (items.has(listKey)) listKey = `${listKey}#${index}`
+      const item = newBuilder()
+      yield* renderChild(ctx, item, child, childPath(path, index, key))
+      keys.push(listKey)
+      items.set(listKey, finish(item))
+    }
+    pushSlot(b, { keys, items })
+  })
+
+const renderVNode = (ctx: RenderContext, b: Builder, node: VNode, path: string): Effect.Effect<void, unknown> => {
   switch (node._tag) {
     case "Raw": {
-      ctx.out.push(node.html)
+      pushSlot(b, node.html)
       return Effect.void
     }
     case "Fragment":
-      return renderChildren(ctx, node.children, path)
+      return renderChildren(ctx, b, node.children, path)
     case "Element":
-      return renderElement(ctx, node, path)
+      return renderElement(ctx, b, node, path)
     case "Component":
-      return renderComponent(ctx, node, path)
+      return renderComponent(ctx, b, node, path)
   }
 }
 
 const renderElement = (
   ctx: RenderContext,
+  b: Builder,
   node: Extract<VNode, { _tag: "Element" }>,
   path: string
 ): Effect.Effect<void, unknown> => {
-  const { out } = ctx
-  out.push(`<${node.type}`)
+  pushStatic(b, `<${node.type}`)
   for (const name of Object.keys(node.props)) {
     if (name === "children" || name === "key") continue
     const value = node.props[name]
     if (name.startsWith("on") && typeof value === "function") {
       const event = name.slice(2).toLowerCase()
       ctx.handlers.set(handlerKey(event, path), value as Events.Handler<any>)
-      out.push(` data-lsc-${event}="${escapeAttribute(path)}"`)
+      pushSlot(b, ` data-lsc-${event}="${escapeAttribute(path)}"`)
       continue
     }
-    const rendered = renderAttribute(name, value)
-    if (rendered !== undefined) out.push(rendered)
+    // The attribute is a slot even when omitted, so toggling it keeps the shape.
+    pushSlot(b, renderAttribute(name, value) ?? "")
   }
-  out.push(">")
+  pushStatic(b, ">")
   if (voidElements.has(node.type)) return Effect.void
-  return Effect.map(renderChildren(ctx, node.props.children, path), () => {
-    out.push(`</${node.type}>`)
+  return Effect.map(renderChildren(ctx, b, node.props.children, path), () => {
+    pushStatic(b, `</${node.type}>`)
   })
 }
 
 const renderComponent = (
   ctx: RenderContext,
+  b: Builder,
   node: Extract<VNode, { _tag: "Component" }>,
   path: string
 ): Effect.Effect<void, unknown> =>
@@ -131,22 +175,31 @@ const renderComponent = (
     const output: Child = Effect.isEffect(result)
       ? yield* Effect.provideService(result as Effect.Effect<Child, unknown, Instance>, Instance, instance)
       : result
-    yield* renderChildren(ctx, output, path)
+    const own = newBuilder()
+    yield* renderChildren(ctx, own, output, path)
+    pushSlot(b, finish(own))
   })
 
 /**
- * Renders `child` for `session`. Replaces the session's handler table and
- * disposes component instances that are no longer in the tree.
+ * Renders `child` for `session` into a wire node. Replaces the session's
+ * handler table and disposes component instances that left the tree.
  */
-export const render = (session: Session, child: Child): Effect.Effect<string, unknown> =>
+export const renderTree = (session: Session, child: Child): Effect.Effect<Node, unknown> =>
   Effect.gen(function*() {
-    const ctx: RenderContext = { session, handlers: new Map(), seen: new Set(), out: [] }
-    yield* renderChild(ctx, child, rootPath)
+    const ctx: RenderContext = { session, handlers: new Map(), seen: new Set() }
+    const root = newBuilder()
+    yield* renderChild(ctx, root, child, rootPath)
     session.handlers = ctx.handlers
     for (const [path, instance] of session.instances) {
       if (ctx.seen.has(path)) continue
       session.instances.delete(path)
       yield* instance.close
     }
-    return ctx.out.join("")
+    return finish(root)
   })
+
+/**
+ * Renders `child` for `session` to an HTML string.
+ */
+export const render = (session: Session, child: Child): Effect.Effect<string, unknown> =>
+  Effect.map(renderTree(session, child), toHtml)

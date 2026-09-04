@@ -19,10 +19,11 @@ import type * as Socket from "effect/unstable/socket/Socket"
 import { script } from "./browser.ts"
 import type { Instance } from "./instance.ts"
 import { type ClientMessage, decodeClientMessage, encodeServerMessage } from "./protocol.ts"
-import { render } from "./render.ts"
+import { render, renderTree } from "./render.ts"
 import { dispatch, makeSession } from "./session.ts"
 import type { Child, ComponentFn } from "./vnode.ts"
 import { jsx, raw } from "./vnode.ts"
+import { diffNode } from "./wire.ts"
 
 export interface MountOptions {
   /** Document title used by the default layout. */
@@ -85,8 +86,13 @@ const live = (component: ComponentFn<{}, unknown, any>, socket: Socket.Socket) =
     const write = yield* socket.writer
     const inbox = yield* Queue.unbounded<ClientMessage>()
 
-    const push = render(session, jsx(component, {})).pipe(
-      Effect.flatMap((html) => write(encodeServerMessage({ t: "render", html }))),
+    // Render, diff against the tree the browser has, send only the patch.
+    const push = renderTree(session, jsx(component, {})).pipe(
+      Effect.flatMap((tree) => {
+        const patch = diffNode(session.tree, tree, session.sentStatics)
+        session.tree = tree
+        return patch === undefined ? Effect.void : write(encodeServerMessage({ t: "render", p: patch }))
+      }),
       Effect.catchCause((cause) => Effect.logError("effect-lsc: render failed", cause))
     )
 

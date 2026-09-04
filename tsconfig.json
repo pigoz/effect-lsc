@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  "include": ["src", "examples", "test", "vite.config.ts", "vitest.config.ts"],
+  "include": ["src", "examples", "test", "scripts", "vite.config.ts", "vitest.config.ts"],
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",

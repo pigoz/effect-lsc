@@ -1,7 +1,7 @@
 /**
  * A session is one live page: the set of component instances rendered for a
- * connection, the handlers registered by the latest render, and a "dirty"
- * signal that requests a re-render.
+ * connection, the handlers registered by the latest render, the tree the
+ * browser currently holds, and a "dirty" signal that requests a re-render.
  *
  * The dirty signal is a sliding queue of capacity 1, so any number of state
  * changes between two renders collapse into a single re-render.
@@ -14,12 +14,17 @@ import * as Scope from "effect/Scope"
 import type * as Events from "./events.ts"
 import type { InstanceHandle } from "./instance.ts"
 import type { ClientEvent } from "./protocol.ts"
+import type { Node } from "./wire.ts"
 
 export interface Session {
   readonly scope: Scope.Scope
   readonly dirty: Queue.Queue<void>
   readonly instances: Map<string, InstanceHandle>
   handlers: ReadonlyMap<string, Events.Handler<any>>
+  /** The tree the browser has, `undefined` before the first render. */
+  tree: Node | undefined
+  /** Fingerprints whose statics the browser already has. */
+  readonly sentStatics: Set<string>
 }
 
 export const makeSession: Effect.Effect<Session, never, Scope.Scope> = Effect.gen(function*() {
@@ -30,7 +35,7 @@ export const makeSession: Effect.Effect<Session, never, Scope.Scope> = Effect.ge
     scope,
     Effect.suspend(() => Effect.forEach(instances.values(), (instance) => instance.close, { discard: true }))
   )
-  return { scope, dirty, instances, handlers: new Map() }
+  return { scope, dirty, instances, handlers: new Map(), tree: undefined, sentStatics: new Set() }
 })
 
 export const handlerKey = (event: string, id: string): string => `${event}:${id}`
