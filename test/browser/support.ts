@@ -42,6 +42,31 @@ export const startServer = async (file: string): Promise<{ url: string; stop: ()
   throw new Error(`server did not start: ${file}\n${log}`)
 }
 
+/** Starts the Cloudflare example under `wrangler dev` (local workerd) on a free port. */
+export const startWrangler = async (): Promise<{ url: string; stop: () => Promise<void> }> => {
+  const port = await freePort()
+  const child: ChildProcess = spawn(
+    "node",
+    ["node_modules/wrangler/bin/wrangler.js", "dev", "--config", "examples/cloudflare/wrangler.toml", "--port", String(port), "--ip", "127.0.0.1"],
+    { cwd: root, env: { ...process.env, CI: "1", WRANGLER_SEND_METRICS: "false" }, stdio: ["ignore", "pipe", "pipe"] }
+  )
+  let log = ""
+  child.stdout?.on("data", (chunk) => (log += chunk))
+  child.stderr?.on("data", (chunk) => (log += chunk))
+  const url = `http://127.0.0.1:${port}/`
+  const deadline = Date.now() + 60000
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url)
+      if (response.ok) return { url, stop: () => new Promise((resolve) => { child.once("exit", () => resolve()); child.kill("SIGTERM") }) }
+    } catch {}
+    if (child.exitCode !== null) break
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  child.kill("SIGKILL")
+  throw new Error(`wrangler dev did not start\n${log}`)
+}
+
 /** A headless browser: Playwright's Chromium, or Chrome when that is not installed. */
 export const launch = async (): Promise<Browser> => {
   try {

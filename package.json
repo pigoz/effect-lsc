@@ -40,6 +40,10 @@
       "types": "./dist/island.d.ts",
       "default": "./dist/island.js"
     },
+    "./cloudflare": {
+      "types": "./dist/cloudflare.d.ts",
+      "default": "./dist/cloudflare.js"
+    },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
       "default": "./dist/jsx-runtime.js"
@@ -57,7 +61,7 @@
     "dist/**/*.d.ts.map"
   ],
   "scripts": {
-    "check": "tsc -p tsconfig.json && tsc -p tsconfig.build.json --outDir .check && rm -rf .check",
+    "check": "tsc -p tsconfig.json && tsc -p tsconfig.build.json --outDir .check && rm -rf .check && tsc -p examples/cloudflare/tsconfig.json --noEmit",
     "runtime": "bun scripts/build-runtime.ts && bun scripts/vendor-idiomorph.ts",
     "build": "rm -rf dist && vite build && tsc -p tsconfig.build.json",
     "test": "vitest run",
@@ -66,8 +70,10 @@
     "shared-counter": "bun examples/shared-counter/index.tsx",
     "todomvc": "bun examples/todomvc/index.tsx",
     "react-island": "bun examples/react-island/index.tsx",
+    "cloudflare": "wrangler dev --config examples/cloudflare/wrangler.toml",
     "prepublishOnly": "bun run check && bun run test && bun run build",
-    "test:node": "LSC_RUNTIME=node vitest run --config vitest.browser.config.ts"
+    "test:node": "LSC_RUNTIME=node vitest run --config vitest.browser.config.ts",
+    "smoke": "bun scripts/smoke-package.ts"
   },
   "peerDependencies": {
     "effect": "^4.0.0-rc.112"

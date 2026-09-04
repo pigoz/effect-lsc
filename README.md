@@ -50,16 +50,19 @@ its state, or the callback.
 
 ## Running the examples
 
-Requires Bun 1.4.1 or later.
-
 ```sh
 bun install
 bun examples/counter/index.tsx          # per-tab state
 bun examples/shared-counter/index.tsx   # one counter shared by every tab
 bun examples/todomvc/index.tsx          # shared list, open it in two tabs
 bun examples/react-island/index.tsx     # a React chart inside a server-driven page
+bun run cloudflare                      # the shared counter in a Durable Object, under wrangler dev
 PORT=4000 bun examples/counter/index.tsx # all examples listen on PORT, default 3000
+node --import tsx examples/counter/index.tsx   # every example also runs on Node
 ```
+
+The examples pick Bun or Node at runtime (`examples/runtime.ts`); Bun needs
+1.4.1 or later.
 
 `View.State` is local to a session (a browser tab). To share state across
 tabs, put a `View.SharedState` in a service and `View.watch` it, as in
@@ -134,8 +137,11 @@ the TodoMVC footer does with the filter.
 
 ### `effect-lsc/server`
 
-`Server.mount(path, Component, options?)` returns a `Layer` that registers
-the page on an `HttpRouter`:
+`Server.page(Component, options?)` renders the document once, and
+`Server.session(Component, socket)` runs the live loop over any Effect
+`Socket`; both are platform independent. `Server.mount(path, Component,
+options?)` wires them to an `HttpRouter` (Bun, Node) as a `Layer` that
+registers the page:
 
 - `GET path` renders the component once and returns a full document
 - a WebSocket upgrade on the same path runs the live session
@@ -148,6 +154,37 @@ a predicate to allow others.
 
 Services required by the root component must be provided to the router
 layer, as in the TodoMVC example (`Layer.provide(Todos.layer)`).
+
+### `effect-lsc/cloudflare`
+
+`Cloudflare.app(Component, { layer, ...options })` returns a `fetch`
+handler for a Durable Object. A GET renders the page; a WebSocket upgrade
+becomes a live session running as a fiber inside the object. The services
+in `layer` are built once per object, so a `View.SharedState` in a service
+is shared by every tab routed to that object: the Durable Object is the
+room.
+
+```ts
+import { DurableObject } from "cloudflare:workers"
+import { Cloudflare } from "effect-lsc/cloudflare"
+
+export class Room extends DurableObject {
+  readonly app = Cloudflare.app(Counter, { layer: Count.layer, title: "Counter" })
+  override fetch(request: Request) {
+    return this.app.fetch(request)
+  }
+}
+
+export default {
+  fetch(request: Request, env: Env) {
+    return env.ROOM.get(env.ROOM.idFromName("global")).fetch(request)
+  }
+}
+```
+
+See `examples/cloudflare` (with its `wrangler.toml`). Sessions keep their
+state in memory, so this uses the classic `accept()` API rather than
+WebSocket hibernation; the object stays alive while sockets are open.
 
 ### `effect-lsc/island`
 
@@ -239,17 +276,21 @@ resolves once a socket was upgraded.
 ## Development
 
 ```sh
-bun run check         # tsc, for the sources and for the declarations build
+bun run check         # tsc: sources, the declarations build, the Cloudflare example
 bun run test          # vitest: renderer, wire protocol, memoization, the browser's merge code
-bun run test:browser  # vitest + Playwright: the runtime in Chromium, against a fixture page and the examples
+bun run test:browser  # vitest + Playwright: the runtime in Chromium against a fixture page and
+                      # the examples, plus the protocol over raw sockets and the Durable Object under wrangler dev
+bun run test:node     # the same, with the servers under test running on Node
 bun run build         # vite (ESM) + tsc (declarations) into dist/
+bun run smoke         # pack, install the tarball in a temp project, render through dist/ with Bun and Node
 bun run runtime       # regenerate the minified browser runtime and vendored idiomorph
 ```
 
 The browser tests need a browser: `bunx playwright install chromium`, or an
 installed Google Chrome, which they fall back to. They cover what unit tests
 cannot: which elements a patch morphs, element identity across list
-operations, focus and typed input, form reset, islands and hooks.
+operations, focus and typed input, form reset, islands and hooks. CI runs
+all of it on every push, with the servers on Bun and on Node.
 
 The browser runtime is written readably in `src/internal/browser.ts` and
 inlined from `src/internal/runtime.ts`, a generated, minified copy; a test

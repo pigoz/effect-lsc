@@ -104,6 +104,30 @@ its `Cause` and the session continues. A crashed process in LiveView would
 re-mount; here the session simply keeps its state. Worth revisiting once
 there is an error boundary story.
 
+## Platforms
+
+`Server.page` and `Server.session` are the platform-independent core: a
+document string, and the live loop over an Effect `Socket`. `Server.mount`
+adapts them to `HttpRouter`, which Bun and Node implement (Node upgrades
+through `ws`). Cloudflare has no Effect HTTP platform, and does not need
+one: `Cloudflare.app` builds a `ManagedRuntime` from the app layer, renders
+the page for a GET, and for an upgrade accepts the server half of a
+`WebSocketPair`, wraps it with `Socket.fromWebSocket` (any object with the
+`WebSocket` interface will do), and forks `session` into the runtime. A
+Durable Object is the natural room: its layer is built once, so a
+`SharedState` in a service is shared by every tab routed to it.
+
+Lesson from the Node port: `Socket.fromWebSocket` completes the handshake
+and opens its write latch only when the read loop runs, so a session must
+start `runString` before writing, with the first render in `onOpen`. Bun's
+socket writes directly, which hid a deadlock that Node and Cloudflare would
+both have hit. This is why the matrix exists.
+
+Not done on Cloudflare: WebSocket hibernation. It would let the object sleep
+between messages, but a session's state (instances, slots, the tree the
+browser holds) lives in memory; hibernation needs it serializable, which
+points at the Elm-style direction (state as one value, events as data).
+
 ## Testing
 
 Three layers. Unit tests (`bun run test`) cover the renderer, the wire
@@ -112,13 +136,19 @@ browser's side of the protocol: a round trip where the client reproduces the
 server HTML after every patch. Browser tests (`bun run test:browser`) run
 the real runtime in Chromium against `test/browser/fixtures/app.tsx`, a
 page with no network dependency that exercises every behaviour the runtime
-must keep, and against the examples. Every bug found by hand has a test at
-the layer where it lives: the single-child path collision (unit), a
-memoized child reading a `State` prop (unit, and the TodoMVC footer in the
-browser), idiomorph's `ignoreActiveValue` skipping a focused button's label
-(browser), element identity across list operations (browser). `bun run
-check` type-checks the declarations build too, since it has neither DOM nor
-Node types and once broke on the `URL` global.
+must keep, and against the examples. Protocol tests (`test/e2e`) speak
+to the examples over raw sockets and rebuild the HTML with the runtime's
+merge code; the Cloudflare test does the same under `wrangler dev`. The
+servers under test run on Bun or, with `LSC_RUNTIME=node`, on Node. Every
+bug found by hand has a test at the layer where it lives: the single-child
+path collision (unit), a memoized child reading a `State` prop (unit, and
+the TodoMVC footer in the browser), idiomorph's `ignoreActiveValue`
+skipping a focused button's label (browser), element identity across list
+operations (browser), the write-before-read deadlock (protocol, on Node).
+`bun run check` type-checks the declarations build and the Cloudflare
+example too, whose type environments differ from the sources'. The package
+smoke test installs the packed tarball into a temporary project and renders
+through the published entry points with Bun and Node.
 
 ## Known limitations
 
