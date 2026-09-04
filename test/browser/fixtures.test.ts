@@ -1,10 +1,10 @@
 import { afterAll, assert, beforeAll, describe, it } from "vitest"
 import { connected, type Harness, open, settle, takeMorphs, traceMorphs } from "./support.ts"
 
-describe("counter example", () => {
+describe("counter fixture", () => {
   let h: Harness
   beforeAll(async () => {
-    h = await open("examples/counter/index.tsx")
+    h = await open("test/browser/fixtures/counter.tsx")
     await connected(h.page)
   })
   afterAll(async () => {
@@ -17,10 +17,10 @@ describe("counter example", () => {
   })
 })
 
-describe("todomvc example", () => {
+describe("todomvc fixture (the example components)", () => {
   let h: Harness
   beforeAll(async () => {
-    h = await open("examples/todomvc/index.tsx")
+    h = await open("test/browser/fixtures/todomvc.tsx")
     await connected(h.page)
     await traceMorphs(h.page)
   })

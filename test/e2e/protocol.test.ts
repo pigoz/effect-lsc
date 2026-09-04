@@ -1,4 +1,4 @@
-// Protocol-level tests: a raw WebSocket client speaks to the examples and
+// Protocol-level tests: a raw WebSocket client speaks to the fixtures and
 // rebuilds the HTML from the patches with the runtime's own merge code.
 import { afterAll, assert, beforeAll, describe, it } from "vitest"
 import WebSocket from "ws"
@@ -56,7 +56,7 @@ const id = (html: string, pattern: RegExp) => {
 describe("counter over the wire", () => {
   let url = ""
   let stop = async () => {}
-  beforeAll(async () => ({ url, stop } = await startServer("examples/counter/index.tsx")))
+  beforeAll(async () => ({ url, stop } = await startServer("test/browser/fixtures/counter.tsx")))
   afterAll(() => stop())
 
   it("serves a page without the application code, and counts clicks per session", async () => {
@@ -102,7 +102,7 @@ describe("counter over the wire", () => {
 describe("shared counter over the wire", () => {
   let url = ""
   let stop = async () => {}
-  beforeAll(async () => ({ url, stop } = await startServer("examples/shared-counter/index.tsx")))
+  beforeAll(async () => ({ url, stop } = await startServer("test/browser/fixtures/shared-counter.tsx")))
   afterAll(() => stop())
 
   it("pushes shared changes to every session, keeps local state per session", async () => {
@@ -124,7 +124,7 @@ describe("shared counter over the wire", () => {
 describe("todomvc over the wire", () => {
   let url = ""
   let stop = async () => {}
-  beforeAll(async () => ({ url, stop } = await startServer("examples/todomvc/index.tsx")))
+  beforeAll(async () => ({ url, stop } = await startServer("test/browser/fixtures/todomvc.tsx")))
   afterAll(() => stop())
 
   it("adds, toggles, filters, edits and clears across two sessions", async () => {

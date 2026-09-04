@@ -20,7 +20,7 @@ export const runtime: "bun" | "node" = process.env["LSC_RUNTIME"] === "node" ? "
 const command = (file: string): [string, Array<string>] =>
   runtime === "node" ? ["node", ["--import", "tsx", file]] : ["bun", [file]]
 
-/** Starts an example or fixture on a free port with the selected runtime and waits for it. */
+/** Starts a fixture on a free port with the selected runtime and waits for it. */
 export const startServer = async (file: string): Promise<{ url: string; stop: () => Promise<void> }> => {
   const port = await freePort()
   const [bin, args] = command(file)

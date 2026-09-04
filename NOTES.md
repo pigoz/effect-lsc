@@ -134,12 +134,14 @@ Three layers. Unit tests (`bun run test`) cover the renderer, the wire
 protocol, memoization and, by evaluating the runtime's own merge code, the
 browser's side of the protocol: a round trip where the client reproduces the
 server HTML after every patch. Browser tests (`bun run test:browser`) run
-the real runtime in Chromium against `test/browser/fixtures/app.tsx`, a
-page with no network dependency that exercises every behaviour the runtime
-must keep, and against the examples. Protocol tests (`test/e2e`) speak
+the real runtime in Chromium against `test/browser/fixtures/`: a page with
+no network dependency that exercises every behaviour the runtime must keep,
+plus fixtures that serve the example components. The examples themselves
+are documentation, plain Bun programs on port 3000; the fixtures are the
+test infrastructure, and the only place that picks Bun or Node at runtime. Protocol tests (`test/e2e`) speak
 to the examples over raw sockets and rebuild the HTML with the runtime's
 merge code; the Cloudflare test does the same under `wrangler dev`. The
-servers under test run on Bun or, with `LSC_RUNTIME=node`, on Node. Every
+fixtures run on Bun or, with `LSC_RUNTIME=node`, on Node. Every
 bug found by hand has a test at the layer where it lives: the single-child
 path collision (unit), a memoized child reading a `State` prop (unit, and
 the TodoMVC footer in the browser), idiomorph's `ignoreActiveValue`

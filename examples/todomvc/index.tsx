@@ -1,11 +1,12 @@
+import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
 import { Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Server } from "effect-lsc/server"
 import type { View } from "effect-lsc/view"
-import { serve } from "../runtime.ts"
 import { App } from "./App.tsx"
 import { Todos } from "./Todos.ts"
 
+// The document around the live content. It is rendered once per page load.
 const layout = (content: View.Child) => (
   <html lang="en">
     <head>
@@ -25,4 +26,11 @@ const layout = (content: View.Child) => (
   </html>
 )
 
-await serve(HttpRouter.serve(Server.mount("/", App, { layout })).pipe(Layer.provide(Todos.layer)))
+const Routes = Server.mount("/", App, { layout })
+
+HttpRouter.serve(Routes).pipe(
+  Layer.provide(Todos.layer),
+  Layer.provide(BunHttpServer.layer({ port: 3000, disablePreemptiveShutdown: true })),
+  Layer.launch,
+  BunRuntime.runMain
+)

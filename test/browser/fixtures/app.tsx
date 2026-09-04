@@ -6,7 +6,7 @@ import { HttpRouter } from "effect/unstable/http"
 import { Island } from "effect-lsc/island"
 import { Server } from "effect-lsc/server"
 import { View } from "effect-lsc/view"
-import { serve } from "../../../examples/runtime.ts"
+import { serve } from "./serve.ts"
 
 type Item = { readonly id: number; readonly label: string; readonly done: boolean }
 

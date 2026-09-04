@@ -57,12 +57,10 @@ bun examples/shared-counter/index.tsx   # one counter shared by every tab
 bun examples/todomvc/index.tsx          # shared list, open it in two tabs
 bun examples/react-island/index.tsx     # a React chart inside a server-driven page
 bun run cloudflare                      # the shared counter in a Durable Object, under wrangler dev
-PORT=4000 bun examples/counter/index.tsx # all examples listen on PORT, default 3000
-node --import tsx examples/counter/index.tsx   # every example also runs on Node
 ```
 
-The examples pick Bun or Node at runtime (`examples/runtime.ts`); Bun needs
-1.4.1 or later.
+Every example listens on port 3000. They are written for Bun 1.4.1 or
+later; the Cloudflare one runs under `wrangler dev`.
 
 `View.State` is local to a session (a browser tab). To share state across
 tabs, put a `View.SharedState` in a service and `View.watch` it, as in
@@ -154,6 +152,31 @@ a predicate to allow others.
 
 Services required by the root component must be provided to the router
 layer, as in the TodoMVC example (`Layer.provide(Todos.layer)`).
+
+The library is runtime independent. On Bun:
+
+```ts
+HttpRouter.serve(App).pipe(
+  Layer.provide(BunHttpServer.layer({ port: 3000, disablePreemptiveShutdown: true })),
+  Layer.launch,
+  BunRuntime.runMain
+)
+```
+
+On Node, with `@effect/platform-node`:
+
+```ts
+import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
+import { createServer } from "node:http"
+
+HttpRouter.serve(App).pipe(
+  Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 })),
+  Layer.launch,
+  NodeRuntime.runMain
+)
+```
+
+On Cloudflare, see `effect-lsc/cloudflare` below.
 
 ### `effect-lsc/cloudflare`
 
@@ -278,9 +301,9 @@ resolves once a socket was upgraded.
 ```sh
 bun run check         # tsc: sources, the declarations build, the Cloudflare example
 bun run test          # vitest: renderer, wire protocol, memoization, the browser's merge code
-bun run test:browser  # vitest + Playwright: the runtime in Chromium against a fixture page and
-                      # the examples, plus the protocol over raw sockets and the Durable Object under wrangler dev
-bun run test:node     # the same, with the servers under test running on Node
+bun run test:browser  # vitest + Playwright: the runtime in Chromium against test fixtures (which reuse the
+                      # example components), the protocol over raw sockets, the Durable Object under wrangler dev
+bun run test:node     # the same, with the fixtures running on Node instead of Bun
 bun run build         # vite (ESM) + tsc (declarations) into dist/
 bun run smoke         # pack, install the tarball in a temp project, render through dist/ with Bun and Node
 bun run runtime       # regenerate the minified browser runtime and vendored idiomorph
