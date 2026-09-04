@@ -9,8 +9,9 @@ import type * as VNode from "./internal/vnode.ts"
 import { Fragment as Fragment_, jsx as jsx_ } from "./internal/vnode.ts"
 import type * as Events from "./internal/events.ts"
 
-export const jsx: (type: unknown, props: VNode.Props, key?: unknown) => VNode.VNode = jsx_
-export const jsxs: (type: unknown, props: VNode.Props, key?: unknown) => VNode.VNode = jsx_
+export const jsx = (type: unknown, props: VNode.Props, key?: unknown): VNode.VNode => jsx_(type, props, key, false)
+/** Emitted for a literal list of sibling children: their shape is static. */
+export const jsxs = (type: unknown, props: VNode.Props, key?: unknown): VNode.VNode => jsx_(type, props, key, true)
 export const Fragment: VNode.Fragment = Fragment_
 
 type Booleanish = boolean | "true" | "false"

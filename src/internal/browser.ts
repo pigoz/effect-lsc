@@ -17,26 +17,38 @@ import { idiomorph } from "./idiomorph.ts"
  */
 export const core: string = `
   var statics = Object.create(null);
+  var hasOwn = Object.prototype.hasOwnProperty;
 
-  function merge(current, patch) {
+  function full(patch) {
+    return merge(undefined, patch);
+  }
+
+  // Merges a patch into the current value. Inside a list, an item without
+  // its own fingerprint uses the list's default one.
+  function merge(current, patch, defaultF) {
     if (typeof patch === "string") return patch;
-    if ("f" in patch) {
-      if (patch.s) statics[patch.f] = patch.s;
-      var node = current && current.f === patch.f ? current : { f: patch.f, d: new Array(statics[patch.f].length - 1) };
-      for (var key in patch) {
-        if (key !== "f" && key !== "s") node.d[+key] = merge(node.d[+key], patch[key]);
+    if (Array.isArray(patch)) return { f: defaultF, d: patch.map(full) };
+    if (patch.k !== undefined || patch.i !== undefined) {
+      var list = current && current.items ? current : { f: "", keys: [], items: Object.create(null) };
+      var listF = patch.f !== undefined ? patch.f : list.f;
+      if (patch.s) statics[listF] = patch.s;
+      var keys = patch.k || list.keys;
+      var items = Object.create(null);
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        var itemPatch = patch.i && hasOwn.call(patch.i, k) ? patch.i[k] : undefined;
+        items[k] = itemPatch === undefined ? list.items[k] : merge(list.items[k], itemPatch, listF);
       }
-      return node;
+      return { f: listF, keys: keys, items: items };
     }
-    var list = current && current.items ? current : { keys: [], items: Object.create(null) };
-    var keys = patch.k || list.keys;
-    var items = Object.create(null);
-    for (var i = 0; i < keys.length; i++) {
-      var k = keys[i];
-      var itemPatch = patch.i && Object.prototype.hasOwnProperty.call(patch.i, k) ? patch.i[k] : undefined;
-      items[k] = itemPatch === undefined ? list.items[k] : merge(list.items[k], itemPatch);
+    var f = patch.f !== undefined ? patch.f : defaultF;
+    if (patch.s) statics[f] = patch.s;
+    if (patch.d !== undefined) return { f: f, d: patch.d.map(full) };
+    var node = current && current.f === f ? current : { f: f, d: new Array(statics[f].length - 1) };
+    for (var key in patch) {
+      if (key !== "f" && key !== "s") node.d[+key] = merge(node.d[+key], patch[key]);
     }
-    return { keys: keys, items: items };
+    return node;
   }
 
   function html(value) {

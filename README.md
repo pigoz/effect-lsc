@@ -147,15 +147,17 @@ runtime          → merges the patch, regenerates the HTML, morphs the DOM with
 ```
 
 A render is a tree of nodes: static strings (tags, attribute names,
-structure) interleaved with slots (text, attribute values, handler ids,
-nested nodes, lists). Statics are identified by a fingerprint and travel once
-per session; after that only slots whose value changed are sent. Lists are
-diffed by `key`, so a reorder sends the new key order and nothing else, and
-repeated items share their statics. Components are nested nodes, so a
-conditional component costs only its own slot. This is LiveView's
-statics/dynamics split, derived from the VNode tree at runtime instead of by
-a template compiler: the compiled `jsx()` calls already expose the structure.
-For 20 todos, toggling one sends about 130 bytes instead of 5 KB of HTML.
+structure, literal sibling lists) interleaved with slots (text, attribute
+values, handler ids, nested nodes, lists). Statics are identified by a
+fingerprint and travel once per session; after that only slots whose value
+changed are sent. Dynamic arrays (`{items.map(…)}`) are lists diffed by
+`key`, so a reorder sends the new key order and nothing else, and items
+share their statics. Components are nested nodes, so a conditional component
+costs only its own slot. This is LiveView's statics/dynamics split, derived
+from the VNode tree at runtime instead of by a template compiler: the
+compiled `jsx()`/`jsxs()` calls already expose the structure and tell static
+siblings from dynamic children. The first render costs the same bytes as the
+HTML; for 1000 todos, toggling one sends 137 bytes instead of 255 KB.
 
 Every node has a path (`r.0.1`, keyed children `r.0.k42`). Component
 instances live at their path, which is what makes `View.State` persist, and

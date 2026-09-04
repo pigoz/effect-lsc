@@ -160,29 +160,38 @@ already an Elm program. The MVP does not commit; the primitive supports both.
 Done: the wire carries slot-level patches (see `wire.ts` and the README).
 What the implementation settled:
 
-- children arrays are lists of wrapper nodes keyed by `key` or index, so a
-  conditional child (`{cond && <X/>}`) changes only its own slot, and a
-  reorder sends only the key order
-- components are nested nodes; elements are inlined into their parent's
-  statics, so a component is the unit of shape (fingerprint) and of identity
-- statics are deduplicated per session by fingerprint, which covers
-  repeated list items (LiveView's comprehensions) and any repeated shape
-- a shape change costs the nested node in full, once
+- the JSX transform already distinguishes a literal list of siblings
+  (`jsxs`, or `isStaticChildren` in `jsxDEV`) from dynamic children such
+  as `{items.map(…)}` (`jsx`). Static siblings are inlined into the
+  parent's statics, exactly like a LiveView template; dynamic arrays become
+  lists of nodes keyed by `key` or index, diffed by key
+- components are nested nodes, so a component is the unit of shape
+  (fingerprint) and of identity, and a conditional component costs only its
+  own slot; a conditional *element* among static siblings flips the
+  enclosing node's fingerprint instead, so wrap large conditional subtrees
+  in a component
+- a list carries the fingerprint most of its items share; those items are
+  bare arrays of slots and the statics travel once (LiveView's
+  comprehensions); items of another shape carry their own fingerprint
+- statics are deduplicated per session by fingerprint
 
-Measured with a 120-line spike before implementing (bytes on the wire):
+Measured on a todo list, bytes on the wire and milliseconds on the server:
 
-| change | full HTML | patch |
-|---|---|---|
-| counter 0 → 1 | 72 | 27 |
-| 20 todos, toggle one | 5363 | 130 |
-| 20 todos, rename one | 5331 | 69 |
-| 20 todos, append one | 5572 | 416 |
-| 0 → 1 todos (shape change) | 614 | 725 |
+| n | full HTML | first render | toggle one: patch | render | diff |
+|---|---|---|---|---|---|
+| 100 | 25 KB | 1.01× | 136 B | 1.9 ms | 0.3 ms |
+| 1000 | 255 KB | 1.01× | 137 B | 12.6 ms | 1.1 ms |
+| 5000 | 1.29 MB | 1.02× | 138 B | 42 ms | 4.8 ms |
 
-Still open: morphing only touched subtrees on the client (currently the
-whole root is morphed after every patch), and per-instance dirtiness on the
-server so that a change deep in the tree does not re-run every component
-body. Neither affects the wire format.
+The first encoding wrapped every list item and every static sibling in its
+own node, which put the first render at 1.8× the HTML; inlining static
+siblings and sharing list statics brought it to the size of the HTML.
+
+Still open: memoizing component instances on the server, so that a change
+deep in the tree does not re-run every component body (the render column
+above, which dominates), and morphing only touched subtrees on the client
+(currently the whole root is morphed after every patch). Neither affects
+the wire format.
 
 Fragment boundaries, instance boundaries and island boundaries are the same
 thing, which is the reason to keep paths and instances as the core identity.

@@ -33,6 +33,13 @@ export interface Element {
   readonly type: string
   readonly props: Props
   readonly key: string | undefined
+  /**
+   * `true` when the JSX transform emitted `jsxs`: the children array is a
+   * literal list of siblings, so its shape is fixed and it can be inlined.
+   * `false` for dynamic children such as `{items.map(…)}`, which become a
+   * keyed list.
+   */
+  readonly staticChildren: boolean
 }
 
 export interface ComponentNode {
@@ -48,6 +55,7 @@ export interface FragmentNode {
   readonly _tag: "Fragment"
   readonly children: Child
   readonly key: string | undefined
+  readonly staticChildren: boolean
 }
 
 /**
@@ -76,13 +84,13 @@ const normalizeKey = (key: unknown): string | undefined =>
  * `jsx("div", { class: "a", children: "x" })` when `jsxImportSource` is
  * `effect-lsc`.
  */
-export const jsx = (type: unknown, props: Props, key?: unknown): VNode => {
+export const jsx = (type: unknown, props: Props, key?: unknown, staticChildren: boolean = false): VNode => {
   const k = normalizeKey(key)
   if (typeof type === "string") {
-    return { [TypeId]: TypeId, _tag: "Element", type, props, key: k }
+    return { [TypeId]: TypeId, _tag: "Element", type, props, key: k, staticChildren }
   }
   if (type === Fragment) {
-    return { [TypeId]: TypeId, _tag: "Fragment", children: props.children, key: k }
+    return { [TypeId]: TypeId, _tag: "Fragment", children: props.children, key: k, staticChildren }
   }
   if (typeof type === "function") {
     return { [TypeId]: TypeId, _tag: "Component", type: type as ComponentFn<any, any, any>, props, key: k }

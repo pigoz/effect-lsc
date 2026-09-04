@@ -11,9 +11,10 @@
  *   maps to the current handler at that position
  *
  * Elements are written inline into the current node as statics (tag,
- * attribute names) and slots (attribute values, text, handler ids). Arrays
- * become lists of nodes keyed by `key` or index. Components become nested
- * nodes, so a component is a unit of both identity and patching.
+ * attribute names) and slots (attribute values, text, handler ids), and so
+ * are literal sibling lists. Dynamic arrays become lists of nodes keyed by
+ * `key` or index. Components become nested nodes, so a component is a unit
+ * of both identity and patching.
  */
 import * as Effect from "effect/Effect"
 import * as Queue from "effect/Queue"
@@ -26,7 +27,7 @@ import { handlerKey } from "./session.ts"
 import type { Child, VNode } from "./vnode.ts"
 import { isVNode } from "./vnode.ts"
 import type { Dyn, Node } from "./wire.ts"
-import { fingerprint, toHtml } from "./wire.ts"
+import { fingerprint, makeList, toHtml } from "./wire.ts"
 
 interface RenderContext {
   readonly session: Session
@@ -60,13 +61,25 @@ const childPath = (path: string, index: number, key: string | undefined) =>
 const keyOf = (child: Child): string | undefined => isVNode(child) && child._tag !== "Raw" ? child.key : undefined
 
 /**
- * Renders the children of a node at `path`. Arrays index their items; a
- * single child gets index 0, so a child never shares its parent's path.
+ * Renders the children of a node at `path`. A single child gets index 0, so
+ * a child never shares its parent's path. A literal list of siblings
+ * (`jsxs`) is inlined child by child; a dynamic array becomes a keyed list.
  */
-const renderChildren = (ctx: RenderContext, b: Builder, children: Child, path: string): Effect.Effect<void, unknown> =>
-  Array.isArray(children)
-    ? renderList(ctx, b, children, path)
-    : renderChild(ctx, b, children, childPath(path, 0, keyOf(children)))
+const renderChildren = (
+  ctx: RenderContext,
+  b: Builder,
+  children: Child,
+  path: string,
+  staticChildren: boolean
+): Effect.Effect<void, unknown> => {
+  if (!Array.isArray(children)) return renderChild(ctx, b, children, childPath(path, 0, keyOf(children)))
+  if (!staticChildren) return renderList(ctx, b, children, path)
+  return Effect.forEach(
+    children as ReadonlyArray<Child>,
+    (child, index) => renderChild(ctx, b, child, childPath(path, index, keyOf(child))),
+    { discard: true }
+  )
+}
 
 const renderChild = (ctx: RenderContext, b: Builder, child: Child, path: string): Effect.Effect<void, unknown> =>
   Effect.suspend(() => {
@@ -101,12 +114,20 @@ const renderList = (
       const key = keyOf(child)
       let listKey = key ?? String(index)
       while (items.has(listKey)) listKey = `${listKey}#${index}`
-      const item = newBuilder()
-      yield* renderChild(ctx, item, child, childPath(path, index, key))
+      const itemPath = childPath(path, index, key)
+      let item: Node
+      if (isVNode(child) && child._tag === "Component") {
+        // A component item is its own node: no wrapper around it.
+        item = yield* buildComponent(ctx, child, itemPath)
+      } else {
+        const builder = newBuilder()
+        yield* renderChild(ctx, builder, child, itemPath)
+        item = finish(builder)
+      }
       keys.push(listKey)
-      items.set(listKey, finish(item))
+      items.set(listKey, item)
     }
-    pushSlot(b, { keys, items })
+    pushSlot(b, makeList(keys, items))
   })
 
 const renderVNode = (ctx: RenderContext, b: Builder, node: VNode, path: string): Effect.Effect<void, unknown> => {
@@ -116,11 +137,13 @@ const renderVNode = (ctx: RenderContext, b: Builder, node: VNode, path: string):
       return Effect.void
     }
     case "Fragment":
-      return renderChildren(ctx, b, node.children, path)
+      return renderChildren(ctx, b, node.children, path, node.staticChildren)
     case "Element":
       return renderElement(ctx, b, node, path)
     case "Component":
-      return renderComponent(ctx, b, node, path)
+      return Effect.map(buildComponent(ctx, node, path), (own) => {
+        pushSlot(b, own)
+      })
   }
 }
 
@@ -145,17 +168,20 @@ const renderElement = (
   }
   pushStatic(b, ">")
   if (voidElements.has(node.type)) return Effect.void
-  return Effect.map(renderChildren(ctx, b, node.props.children, path), () => {
+  return Effect.map(renderChildren(ctx, b, node.props.children, path, node.staticChildren), () => {
     pushStatic(b, `</${node.type}>`)
   })
 }
 
-const renderComponent = (
+/**
+ * Renders a component at `path` into its own node, creating or reusing the
+ * instance that lives there.
+ */
+const buildComponent = (
   ctx: RenderContext,
-  b: Builder,
   node: Extract<VNode, { _tag: "Component" }>,
   path: string
-): Effect.Effect<void, unknown> =>
+): Effect.Effect<Node, unknown> =>
   Effect.gen(function*() {
     let instance = ctx.session.instances.get(path)
     if (instance !== undefined && instance.type !== node.type) {
@@ -176,8 +202,8 @@ const renderComponent = (
       ? yield* Effect.provideService(result as Effect.Effect<Child, unknown, Instance>, Instance, instance)
       : result
     const own = newBuilder()
-    yield* renderChildren(ctx, own, output, path)
-    pushSlot(b, finish(own))
+    yield* renderChildren(ctx, own, output, path, false)
+    return finish(own)
   })
 
 /**

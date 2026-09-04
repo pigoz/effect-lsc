@@ -5,7 +5,7 @@ import { core } from "../src/internal/browser.ts"
 import { renderTree } from "../src/internal/render.ts"
 import { dispatch, makeSession, type Session } from "../src/internal/session.ts"
 import type { Child } from "../src/internal/vnode.ts"
-import { diffNode, type NodePatch, toHtml } from "../src/internal/wire.ts"
+import { diffNode, type ListPatch, type NodePatch, type Patch, toHtml } from "../src/internal/wire.ts"
 
 /** The browser's merge/html functions, evaluated from the runtime source. */
 const client = () => {
@@ -37,7 +37,9 @@ const roundTrip = (session: Session, child: Child, actions: ReadonlyArray<Effect
     }
   })
 
-const slotsOf = (patch: NodePatch) => Object.keys(patch).filter((k) => k !== "f" && k !== "s")
+const node = (patch: Patch | undefined): NodePatch => patch as NodePatch
+const list = (patch: Patch | undefined): ListPatch => patch as ListPatch
+const slotsOf = (patch: NodePatch) => Object.keys(patch).filter((k) => k !== "f" && k !== "s" && k !== "d")
 
 describe("wire", () => {
   it.effect("the first render is complete and later renders carry only changed slots", () =>
@@ -49,10 +51,9 @@ describe("wire", () => {
       const session = yield* makeSession
       const first = yield* step(session, <Counter />)
       assert.isDefined(first.patch!.s)
-      const button = first.patch![0] as NodePatch
+      const button = node(first.patch!.d![0])
       assert.deepStrictEqual(button.s, ["<button", ">", "</button>"])
-      assert.strictEqual(button[0], ` data-lsc-click="r.0"`)
-      assert.strictEqual(button[1], "0")
+      assert.deepStrictEqual(button.d, [` data-lsc-click="r.0"`, "0"])
 
       const unchanged = yield* step(session, <Counter />)
       assert.isUndefined(unchanged.patch)
@@ -60,14 +61,15 @@ describe("wire", () => {
       yield* dispatch(session, { t: "event", type: "click", id: "r.0" })
       const second = yield* step(session, <Counter />)
       assert.isUndefined(second.patch!.s)
+      assert.isUndefined(second.patch!.d)
       assert.deepStrictEqual(slotsOf(second.patch!), ["0"])
-      const patched = second.patch![0] as NodePatch
+      const patched = node(second.patch![0])
       assert.isUndefined(patched.s)
       assert.deepStrictEqual(slotsOf(patched), ["1"])
       assert.strictEqual(patched[1], "1")
     }))
 
-  it.effect("lists are diffed by key and repeated items share their statics", () =>
+  it.effect("lists are diffed by key and items share the list's statics", () =>
     Effect.gen(function*() {
       const Item = (p: { readonly name: string; readonly done: boolean }) => (
         <li class={[p.done && "done"]} onClick={() => {}}>{p.name}</li>
@@ -77,44 +79,34 @@ describe("wire", () => {
       )
       const session = yield* makeSession
       const first = yield* step(session, <List items={[["a", false], ["b", false], ["c", false]]} />)
-      const listPatch = (patch: NodePatch) => (patch[0] as NodePatch)[0] as { k?: ReadonlyArray<string>; i?: Record<string, NodePatch> }
-      const l0 = listPatch(first.patch!)
+      // root node -> List component node -> <ul> slot 0 -> the list
+      const listOf = (patch: NodePatch) => list(node(patch.d![0]).d![0])
+      const l0 = listOf(first.patch!)
       assert.deepStrictEqual(l0.k, ["a", "b", "c"])
-      // each list item is a wrapper node holding the <Item> component node;
-      // three items, one set of <li> statics: only the first carries `s`
-      const li = (key: string) => l0.i![key]![0] as NodePatch
-      assert.isDefined(li("a").s)
-      assert.isUndefined(li("b").s)
-      assert.isUndefined(li("c").s)
+      // statics once, on the list; items are bare arrays of slots
+      assert.isDefined(l0.f)
+      assert.deepStrictEqual(l0.s, ["<li", "", ">", "</li>"])
+      assert.deepStrictEqual(l0.i!["a"], ["", ` data-lsc-click="r.0.ka.0"`, "a"])
+      assert.deepStrictEqual(l0.i!["b"], ["", ` data-lsc-click="r.0.kb.0"`, "b"])
 
       // reorder: key order only, no item patches
       const reordered = yield* step(session, <List items={[["c", false], ["a", false], ["b", false]]} />)
-      const l1 = listPatch(reordered.patch!)
-      assert.deepStrictEqual(l1.k, ["c", "a", "b"])
-      assert.isUndefined(l1.i)
+      assert.deepStrictEqual(list(node(reordered.patch![0])[0]), { k: ["c", "a", "b"] })
 
-      // toggle one: that item's changed slot only, no key order
+      // toggle one: that item's changed slot only, no key order, no fingerprint
       const toggled = yield* step(session, <List items={[["c", false], ["a", true], ["b", false]]} />)
-      const l2 = listPatch(toggled.patch!)
-      assert.isUndefined(l2.k)
-      assert.deepStrictEqual(Object.keys(l2.i!), ["a"])
-      const toggledLi = l2.i!["a"]![0] as NodePatch
-      assert.deepStrictEqual(slotsOf(toggledLi), ["0"])
-      assert.strictEqual(toggledLi[0], ` class="done"`)
+      assert.deepStrictEqual(list(node(toggled.patch![0])[0]), { i: { a: { 0: ` class="done"` } } })
 
-      // append: new key order plus the new item, without statics
+      // append: new key order plus the new item as a bare array, no statics
       const appended = yield* step(session, <List items={[["c", false], ["a", true], ["b", false], ["d", false]]} />)
-      const l3 = listPatch(appended.patch!)
-      assert.deepStrictEqual(l3.k, ["c", "a", "b", "d"])
-      assert.deepStrictEqual(Object.keys(l3.i!), ["d"])
-      assert.isUndefined(l3.i!["d"]!.s)
-      assert.isUndefined((l3.i!["d"]![0] as NodePatch).s)
+      assert.deepStrictEqual(list(node(appended.patch![0])[0]), {
+        k: ["c", "a", "b", "d"],
+        i: { d: ["", ` data-lsc-click="r.0.kd.0"`, "d"] }
+      })
 
       // remove the head: key order only
       const removed = yield* step(session, <List items={[["a", true], ["b", false], ["d", false]]} />)
-      const l4 = listPatch(removed.patch!)
-      assert.deepStrictEqual(l4.k, ["a", "b", "d"])
-      assert.isUndefined(l4.i)
+      assert.deepStrictEqual(list(node(removed.patch![0])[0]), { k: ["a", "b", "d"] })
     }))
 
   it.effect("a shape change re-sends the nested node in full, and only that", () =>
@@ -129,21 +121,16 @@ describe("wire", () => {
       const session = yield* makeSession
       yield* step(session, <Row editing={false} />)
       const opened = yield* step(session, <Row editing={true} />)
-      // Row's children are a list; only item "1" (the conditional) changes,
-      // and it carries the Editor node in full since its shape is new
-      const row = opened.patch![0] as NodePatch
-      assert.deepStrictEqual(slotsOf(row), ["0"])
-      const children = row[0] as { k?: ReadonlyArray<string>; i?: Record<string, NodePatch> }
-      assert.isUndefined(children.k)
-      assert.deepStrictEqual(Object.keys(children.i!), ["1"])
-      const editor = children.i!["1"]![0] as NodePatch
+      // Row's siblings are static, so the conditional is one slot of the Row
+      // node: it changes from "" to the Editor node, sent in full
+      const row = node(opened.patch![0])
+      assert.deepStrictEqual(slotsOf(row), ["1"])
+      const editor = node(row[1])
       assert.deepStrictEqual(editor.s, ["<input", "", ">"])
-      assert.strictEqual(editor[0], ` class="edit"`)
-      assert.strictEqual(editor[1], " autofocus")
+      assert.deepStrictEqual(editor.d, [` class="edit"`, " autofocus"])
 
       const closed = yield* step(session, <Row editing={false} />)
-      const closedChildren = (closed.patch![0] as NodePatch)[0] as { i?: Record<string, NodePatch> }
-      assert.strictEqual(closedChildren.i!["1"]![0], "")
+      assert.deepStrictEqual(node(closed.patch![0])[1], "")
     }))
 
   it.effect("the browser reproduces the server HTML after every patch", () =>
@@ -168,6 +155,7 @@ describe("wire", () => {
             {todos.length > 0 && <ul>{todos.map((t) => <Item key={t.id} todo={t} />)}</ul>}
             {todos.length > 0 && <footer><strong>{remaining}</strong> left</footer>}
             {View.raw("<!-- raw -->")}
+            {[1, "two", null, [<b key="x">x</b>, false]]}
           </section>
         )
       })
