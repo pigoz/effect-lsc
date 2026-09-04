@@ -160,6 +160,7 @@ export const script: string = `${idiomorph}
       tree = null;
       statics = Object.create(null);
       rooted = Object.create(null);
+      anchors = new Map();
       root.removeAttribute("data-lsc-disconnected");
     };
     ws.onmessage = function (event) {
@@ -176,11 +177,27 @@ export const script: string = `${idiomorph}
   var morphOptions = {
     // The text input being typed into keeps the user's value.
     ignoreActiveValue: true,
-    callbacks: { afterNodeAdded: autofocus }
+    callbacks: { afterNodeAdded: autofocus, beforeNodeRemoved: forget }
   };
 
+  // Anchored elements by path. A hit is verified, since a morph may have
+  // replaced the element; removed subtrees are forgotten so nothing leaks.
+  var anchors = new Map();
+
   function find(path) {
-    return root.querySelector('[data-lsc-n="' + CSS.escape(path) + '"]');
+    var cached = anchors.get(path);
+    if (cached && cached.isConnected && cached.getAttribute("data-lsc-n") === path) return cached;
+    var element = root.querySelector('[data-lsc-n="' + CSS.escape(path) + '"]');
+    if (element) anchors.set(path, element);
+    else anchors.delete(path);
+    return element;
+  }
+
+  function forget(node) {
+    if (node.nodeType !== 1) return;
+    if (node.hasAttribute("data-lsc-n")) anchors.delete(node.getAttribute("data-lsc-n"));
+    var inner = node.querySelectorAll("[data-lsc-n]");
+    for (var i = 0; i < inner.length; i++) anchors.delete(inner[i].getAttribute("data-lsc-n"));
   }
 
   // Builds the element for a single-element node, or null.
@@ -225,7 +242,10 @@ export const script: string = `${idiomorph}
     }
     for (var m = 0; m < previous.keys.length; m++) {
       var old = previous.keys[m];
-      if (!(old in next.items)) elements[old].remove();
+      if (!(old in next.items)) {
+        forget(elements[old]);
+        elements[old].remove();
+      }
     }
     for (var c = 0; c < created.length; c++) autofocus(created[c]);
     return true;
@@ -265,6 +285,7 @@ export const script: string = `${idiomorph}
     }
     changed = new Set();
     if (morphs === null) {
+      anchors = new Map();
       Idiomorph.morph(root, html(tree, "r"), Object.assign({ morphStyle: "innerHTML" }, morphOptions));
       return;
     }
