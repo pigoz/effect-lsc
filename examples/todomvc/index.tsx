@@ -1,8 +1,8 @@
-import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
-import { Config, Layer } from "effect"
+import { Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Server } from "effect-lsc/server"
 import type { View } from "effect-lsc/view"
+import { serve } from "../runtime.ts"
 import { App } from "./App.tsx"
 import { Todos } from "./Todos.ts"
 
@@ -25,16 +25,4 @@ const layout = (content: View.Child) => (
   </html>
 )
 
-const Routes = Server.mount("/", App, { layout })
-
-HttpRouter.serve(Routes).pipe(
-  Layer.provide(Todos.layer),
-  Layer.provide(BunHttpServer.layerConfig({
-    port: Config.port("PORT").pipe(Config.withDefault(3000)),
-    // Interrupt live sessions first, then stop: Ctrl+C exits at once.
-    // Needs Bun 1.4.1+.
-    disablePreemptiveShutdown: Config.succeed(true)
-  })),
-  Layer.launch,
-  BunRuntime.runMain
-)
+await serve(HttpRouter.serve(Server.mount("/", App, { layout })).pipe(Layer.provide(Todos.layer)))

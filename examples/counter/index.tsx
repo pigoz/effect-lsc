@@ -1,8 +1,7 @@
-import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
-import { Config, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Server } from "effect-lsc/server"
 import { View } from "effect-lsc/view"
+import { serve } from "../runtime.ts"
 
 // The component runs on the server. `count` lives on the server. The
 // onClick callback never leaves the server: the browser only sees an id.
@@ -20,15 +19,4 @@ const Counter = View.Component(function*() {
   )
 })
 
-const App = Server.mount("/", Counter, { title: "Counter" })
-
-HttpRouter.serve(App).pipe(
-  Layer.provide(BunHttpServer.layerConfig({
-    port: Config.port("PORT").pipe(Config.withDefault(3000)),
-    // Interrupt live sessions first, then stop: Ctrl+C exits at once.
-    // Needs Bun 1.4.1+.
-    disablePreemptiveShutdown: Config.succeed(true)
-  })),
-  Layer.launch,
-  BunRuntime.runMain
-)
+await serve(HttpRouter.serve(Server.mount("/", Counter, { title: "Counter" })))

@@ -66,22 +66,27 @@
     "shared-counter": "bun examples/shared-counter/index.tsx",
     "todomvc": "bun examples/todomvc/index.tsx",
     "react-island": "bun examples/react-island/index.tsx",
-    "prepublishOnly": "bun run check && bun run test && bun run build"
+    "prepublishOnly": "bun run check && bun run test && bun run build",
+    "test:node": "LSC_RUNTIME=node vitest run --config vitest.browser.config.ts"
   },
   "peerDependencies": {
     "effect": "^4.0.0-rc.112"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20260904.1",
     "@effect/language-service": "^0.87.2",
     "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0-rc.112",
     "@effect/vitest": "4.0.0-rc.112",
     "@types/bun": "^1.4.0",
     "effect": "4.0.0-rc.112",
     "idiomorph": "0.7.4",
     "playwright": "1.62.1",
+    "tsx": "4.23.13",
     "typescript": "7.0.2",
     "vite": "^8.2.2",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "wrangler": "4.129.0"
   },
   "publishConfig": {
     "access": "public"

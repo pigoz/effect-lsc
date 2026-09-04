@@ -1,12 +1,17 @@
 /**
- * `Server`: mounts a component on an `HttpRouter` path.
+ * `Server`: runs components over HTTP and WebSockets.
  *
- * A plain GET renders the component once and returns a full HTML document
- * with the browser runtime inlined. The runtime then opens a WebSocket to
- * the same path; that request is upgraded and becomes a live session:
- * the component is rendered again with fresh state, every event from the
- * browser runs its server-side handler, and every state change re-renders
- * and pushes new HTML.
+ * Two platform-independent primitives do the work:
+ *
+ * - `page` renders a component once into a full HTML document with the
+ *   browser runtime inlined (the "dead" render, for a plain GET)
+ * - `session` runs the live loop over an Effect `Socket`: the component is
+ *   rendered again with fresh state, every event from the browser runs its
+ *   server-side handler, and every state change re-renders and pushes a
+ *   patch; it ends when the socket closes
+ *
+ * `mount` wires both to an `HttpRouter` path (Bun, Node); the Cloudflare
+ * module wires them to a Durable Object.
  */
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
@@ -64,18 +69,26 @@ const liveContent = (html: string): Child => [
 ]
 
 /**
- * The "dead" render: a regular HTTP GET.
+ * Renders `component` once, with fresh disconnected state, into a full
+ * HTML document with the browser runtime inlined.
  */
-const page = (component: ComponentFn<{}, unknown, any>, options: MountOptions | undefined) =>
+export const page = <E, R>(
+  component: ComponentFn<{}, E, R>,
+  options?: MountOptions
+): Effect.Effect<string, unknown, Exclude<R, Instance>> =>
   Effect.scoped(
     Effect.gen(function*() {
       const session = yield* makeSession(false)
       const html = yield* render(session, jsx(component, {}))
       const layout = options?.layout ?? defaultLayout(options?.title ?? "effect-lsc")
       const document = yield* render(yield* makeSession(false), layout(liveContent(html)))
-      return HttpServerResponse.html(`<!doctype html>${document}`)
+      return `<!doctype html>${document}`
     })
-  ).pipe(
+  ) as Effect.Effect<string, unknown, Exclude<R, Instance>>
+
+const pageResponse = (component: ComponentFn<{}, unknown, any>, options: MountOptions | undefined) =>
+  page(component, options).pipe(
+    Effect.map((html) => HttpServerResponse.html(html)),
     Effect.catchCause((cause) =>
       Effect.as(
         Effect.logError("effect-lsc: render failed", cause),
@@ -85,9 +98,13 @@ const page = (component: ComponentFn<{}, unknown, any>, options: MountOptions | 
   )
 
 /**
- * The live session, running over an upgraded WebSocket.
+ * Runs the live session for `component` over `socket`, until the socket
+ * closes. Failures are logged; a closed socket is a normal end.
  */
-const live = (component: ComponentFn<{}, unknown, any>, socket: Socket.Socket) =>
+export const session = <E, R>(
+  component: ComponentFn<{}, E, R>,
+  socket: Socket.Socket
+): Effect.Effect<void, never, Exclude<R, Instance>> =>
   Effect.gen(function*() {
     const session = yield* makeSession(true)
     const write = yield* socket.writer
@@ -103,24 +120,27 @@ const live = (component: ComponentFn<{}, unknown, any>, socket: Socket.Socket) =
       Effect.catchCause((cause) => Effect.logError("effect-lsc: render failed", cause))
     )
 
-    yield* push
     // Re-render whenever any watched state changes. Bursts collapse into one.
     yield* Effect.forkScoped(Effect.forever(Effect.andThen(Queue.take(session.dirty), push)))
     // Events are handled one at a time, in arrival order.
     yield* Effect.forkScoped(Effect.forever(Effect.flatMap(Queue.take(inbox), (event) => dispatch(session, event))))
-    // Runs until the socket closes; closing the scope stops the fibers above.
-    yield* socket.runString((message) =>
-      decodeClientMessage(message).pipe(
-        Effect.flatMap((decoded) => Queue.offer(inbox, decoded)),
-        Effect.catchCause((cause) => Effect.logWarning("effect-lsc: ignoring malformed client message", cause))
-      )
+    // The read loop owns the socket: on some platforms it completes the
+    // handshake and only then accepts writes, so the first render goes in
+    // onOpen. Runs until the socket closes; closing the scope stops the
+    // fibers above.
+    yield* socket.runString(
+      (message) =>
+        decodeClientMessage(message).pipe(
+          Effect.flatMap((decoded) => Queue.offer(inbox, decoded)),
+          Effect.catchCause((cause) => Effect.logWarning("effect-lsc: ignoring malformed client message", cause))
+        ),
+      { onOpen: push }
     )
   }).pipe(
     Effect.scoped,
     Effect.catchTag("SocketError", () => Effect.void),
-    Effect.catchCause((cause) => Effect.logError("effect-lsc: live session failed", cause)),
-    Effect.as(HttpServerResponse.empty())
-  )
+    Effect.catchCause((cause) => Effect.logError("effect-lsc: live session failed", cause))
+  ) as Effect.Effect<void, never, Exclude<R, Instance>>
 
 const isUpgrade = (request: HttpServerRequest.HttpServerRequest) =>
   request.headers["upgrade"]?.toLowerCase() === "websocket"
@@ -173,10 +193,10 @@ export const mount = <E = never, R = never>(
 ): Layer.Layer<never, never, HttpRouter.HttpRouter | HttpRouter.Request.From<"Requires", Exclude<R, Instance | HttpRouter.Provided>>> => {
   const handler = Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
     !isUpgrade(request)
-      ? page(component, options)
+      ? pageResponse(component, options)
       : !originAllowed(request.headers["origin"], request.headers["host"], options?.origins)
       ? forbidden(request)
-      : Effect.flatMap(request.upgrade, (socket) => live(component, socket))
+      : Effect.flatMap(request.upgrade, (socket) => Effect.as(session(component, socket), HttpServerResponse.empty()))
   ).pipe(
     Effect.catchCause((cause) =>
       Effect.as(

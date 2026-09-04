@@ -14,10 +14,17 @@ const freePort = () =>
     })
   })
 
-/** Starts an example or fixture with Bun on a free port and waits for it. */
+/** Which runtime runs the servers under test: `bun` (default) or `node`. */
+export const runtime: "bun" | "node" = process.env["LSC_RUNTIME"] === "node" ? "node" : "bun"
+
+const command = (file: string): [string, Array<string>] =>
+  runtime === "node" ? ["node", ["--import", "tsx", file]] : ["bun", [file]]
+
+/** Starts an example or fixture on a free port with the selected runtime and waits for it. */
 export const startServer = async (file: string): Promise<{ url: string; stop: () => Promise<void> }> => {
   const port = await freePort()
-  const child: ChildProcess = spawn("bun", [file], { cwd: root, env: { ...process.env, PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"] })
+  const [bin, args] = command(file)
+  const child: ChildProcess = spawn(bin, args, { cwd: root, env: { ...process.env, PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"] })
   let log = ""
   child.stdout?.on("data", (chunk) => (log += chunk))
   child.stderr?.on("data", (chunk) => (log += chunk))

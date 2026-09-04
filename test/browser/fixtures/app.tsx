@@ -1,12 +1,12 @@
 // A page built for the browser tests: every behaviour the runtime must
 // keep is exercised here without any network dependency. Each section is
 // its own component, so the tests can assert which element gets morphed.
-import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
-import { Config, Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Island } from "effect-lsc/island"
 import { Server } from "effect-lsc/server"
 import { View } from "effect-lsc/view"
+import { serve } from "../../../examples/runtime.ts"
 
 type Item = { readonly id: number; readonly label: string; readonly done: boolean }
 
@@ -146,12 +146,4 @@ window.lsc.island("Box", {
   </html>
 )
 
-HttpRouter.serve(Server.mount("/", Page, { layout })).pipe(
-  Layer.provide(Shared.layer),
-  Layer.provide(BunHttpServer.layerConfig({
-    port: Config.port("PORT").pipe(Config.withDefault(3000)),
-    disablePreemptiveShutdown: Config.succeed(true)
-  })),
-  Layer.launch,
-  BunRuntime.runMain
-)
+await serve(HttpRouter.serve(Server.mount("/", Page, { layout })).pipe(Layer.provide(Shared.layer)))

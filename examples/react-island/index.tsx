@@ -1,9 +1,9 @@
-import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
-import { Config, Effect, Layer } from "effect"
+import { Effect } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Island } from "effect-lsc/island"
 import { Server } from "effect-lsc/server"
 import { View } from "effect-lsc/view"
+import { serve } from "../runtime.ts"
 
 // A server-driven page with a React island inside it. The server owns the
 // data (a sample every second) and pushes it to the island as props; React
@@ -94,13 +94,4 @@ window.lsc.island("Chart", {
   </html>
 )
 
-const App = Server.mount("/", Dashboard, { layout })
-
-HttpRouter.serve(App).pipe(
-  Layer.provide(BunHttpServer.layerConfig({
-    port: Config.port("PORT").pipe(Config.withDefault(3000)),
-    disablePreemptiveShutdown: Config.succeed(true)
-  })),
-  Layer.launch,
-  BunRuntime.runMain
-)
+await serve(HttpRouter.serve(Server.mount("/", Dashboard, { layout })))

@@ -10,7 +10,7 @@ export default defineConfig({
     }
   },
   test: {
-    include: ["test/browser/**/*.test.ts"],
+    include: ["test/browser/**/*.test.ts", "test/e2e/**/*.test.ts"],
     testTimeout: 60000,
     hookTimeout: 60000,
     fileParallelism: false
