@@ -110,6 +110,7 @@ That is the whole integration: TypeScript, Bun and Vite compile `<div/>` to
 | `View.watch(state)` | Reads a `State` received from a parent, a `SharedState`, or (escape hatch) any `SubscriptionRef`, and re-renders the component whenever it changes. The only bridge between Effect state and the component graph. |
 | `View.raw(html)` | Trusted HTML, emitted verbatim. |
 | `View.render(jsx)` | Renders once to an HTML string. Handy in tests. |
+| `View.connected` | `false` during the HTTP render of the page, `true` in the live session. Both run the component; skip work that only matters live (timers, subscriptions). |
 | `View.Instance` | The service that `State` and `watch` need; the renderer provides it. Its `scope` closes when the component leaves the tree. |
 
 Event handlers receive a small, generic event: `{ type, value?, checked?,

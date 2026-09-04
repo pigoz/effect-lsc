@@ -18,6 +18,8 @@ import type { Node } from "./wire.ts"
 
 export interface Session {
   readonly scope: Scope.Scope
+  /** `true` for a live session over a socket, `false` for the HTTP render. */
+  readonly connected: boolean
   readonly dirty: Queue.Queue<void>
   readonly instances: Map<string, InstanceHandle>
   /** Handlers by `event:path`, maintained incrementally by the renderer. */
@@ -30,7 +32,7 @@ export interface Session {
   readonly sentStatics: Set<string>
 }
 
-export const makeSession: Effect.Effect<Session, never, Scope.Scope> = Effect.gen(function*() {
+export const makeSession = (connected: boolean = true): Effect.Effect<Session, never, Scope.Scope> => Effect.gen(function*() {
   const scope = yield* Effect.scope
   const dirty = yield* Queue.sliding<void>(1)
   const instances = new Map<string, InstanceHandle>()
@@ -40,6 +42,7 @@ export const makeSession: Effect.Effect<Session, never, Scope.Scope> = Effect.ge
   )
   return {
     scope,
+    connected,
     dirty,
     instances,
     handlers: new Map(),

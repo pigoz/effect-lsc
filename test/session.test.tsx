@@ -20,7 +20,7 @@ describe("session", () => {
         const count = yield* View.State(0)
         return <button onClick={() => count.update((n) => n + 1)}>{count.value}</button>
       })
-      const session = yield* makeSession
+      const session = yield* makeSession()
       const first = yield* render(session, <Counter />)
       assert.strictEqual(first, `<button data-lsc-click="r.0">0</button>`)
 
@@ -43,7 +43,7 @@ describe("session", () => {
           ? <button onClick={() => on.set(false)}>on</button>
           : <button onClick={() => on.set(true)}>off</button>
       })
-      const session = yield* makeSession
+      const session = yield* makeSession()
       const first = yield* render(session, <Toggle />)
       yield* click(session, first)
       assert.strictEqual(yield* render(session, <Toggle />), `<button data-lsc-click="r.0">on</button>`)
@@ -61,7 +61,7 @@ describe("session", () => {
       const List = (props: { readonly ids: ReadonlyArray<string> }) => (
         <ul>{props.ids.map((id) => <Item key={id} id={id} />)}</ul>
       )
-      const session = yield* makeSession
+      const session = yield* makeSession()
       const first = yield* render(session, <List ids={["a", "b"]} />)
       assert.strictEqual(first, `<ul><li data-lsc-click="r.0.ka.0">a:0</li><li data-lsc-click="r.0.kb.0">b:0</li></ul>`)
       yield* dispatch(session, { t: "event", type: "click", id: "r.0.kb.0" })
@@ -77,7 +77,7 @@ describe("session", () => {
           Scope.addFinalizer(instance.scope, Deferred.succeed(closed, undefined)))
         return <span>child</span>
       })
-      const session = yield* makeSession
+      const session = yield* makeSession()
       yield* render(session, <div><Child /></div>)
       assert.isFalse(yield* Deferred.isDone(closed))
       yield* render(session, <div />)
@@ -103,7 +103,7 @@ describe("session", () => {
           </div>
         )
       })
-      const session = yield* makeSession
+      const session = yield* makeSession()
       const first = yield* render(session, <Parent />)
       assert.include(first, "<b>1</b>")
       yield* dispatch(session, { t: "event", type: "click", id: "r.0.1" })
@@ -121,7 +121,7 @@ describe("session", () => {
         const value = yield* View.watch(shared)
         return <p>{value}</p>
       })
-      const session = yield* makeSession
+      const session = yield* makeSession()
       assert.strictEqual(yield* render(session, <Show />), "<p>1</p>")
       const doubled = yield* shared.modify((n) => [n * 2, n + 1] as const)
       assert.strictEqual(doubled, 2)
@@ -136,7 +136,7 @@ describe("session", () => {
         const value = yield* View.watch(shared)
         return <p>{value}</p>
       })
-      const session = yield* makeSession
+      const session = yield* makeSession()
       assert.strictEqual(yield* render(session, <Show />), "<p>1</p>")
       assert.strictEqual(yield* Queue.size(session.dirty), 0)
       yield* SubscriptionRef.set(shared, 2)
@@ -152,7 +152,7 @@ describe("session", () => {
           <button onClick={() => Effect.sync(() => hits.push("button"))}>x</button>
         </div>
       )
-      const session = yield* makeSession
+      const session = yield* makeSession()
       const html = yield* render(session, <Nested />)
       assert.strictEqual(html, `<div data-lsc-click="r.0"><button data-lsc-click="r.0.0">x</button></div>`)
       yield* dispatch(session, { t: "event", type: "click", id: "r.0.0" })
@@ -160,10 +160,21 @@ describe("session", () => {
       assert.deepStrictEqual(hits, ["button", "div"])
     }))
 
+  it.effect("View.connected tells the HTTP render from the live session", () =>
+    Effect.gen(function*() {
+      const Probe = View.Component(function*() {
+        const live = yield* View.connected
+        return <p>{live ? "live" : "static"}</p>
+      })
+      assert.strictEqual(yield* View.render(<Probe />), "<p>static</p>")
+      const session = yield* makeSession(true)
+      assert.strictEqual(yield* render(session, <Probe />), "<p>live</p>")
+    }))
+
   it.effect("handler failures are logged, not fatal", () =>
     Effect.gen(function*() {
       const Boom = () => <button onClick={() => Effect.fail("nope")}>x</button>
-      const session = yield* makeSession
+      const session = yield* makeSession()
       const html = yield* render(session, <Boom />)
       yield* click(session, html)
       yield* dispatch(session, { t: "event", type: "click", id: "does-not-exist" })

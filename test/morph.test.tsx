@@ -60,7 +60,7 @@ describe("subtree morphing", () => {
         )
       })
       const browser = client()
-      const session = yield* makeSession
+      const session = yield* makeSession()
       let tree: unknown = null
       const apply = (child: Child) =>
         Effect.map(step(session, child), (patch) => {
@@ -105,7 +105,7 @@ describe("subtree morphing", () => {
       })
       const App = () => <div><Text /></div>
       const browser = client()
-      const session = yield* makeSession
+      const session = yield* makeSession()
       let tree: unknown = null
       const apply = (child: Child) =>
         Effect.map(step(session, child), (patch) => {

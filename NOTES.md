@@ -68,8 +68,8 @@ missing one fails at render time.
 **Dead render, then live render.** `GET` renders with a fresh session and
 throws it away; the WebSocket starts another fresh session. Initial state
 computations run twice, and a component that reads the request could see two
-different contexts. LiveView has the same shape (`connected?/1`); a
-`View.connected` flag or a mount-once hook would be the fix.
+different contexts. LiveView has the same shape (`connected?/1`), and so do
+we: `View.connected` is `false` in the HTTP render and `true` live.
 
 **Slot-level patches, memoized instances, subtree morphs.** A render is a
 tree of statics and slots (`wire.ts`); the session keeps the tree the
@@ -285,7 +285,6 @@ event names; closures cover both.
 | navigation and URL (`live_patch`, pushState, `handle_params`) | no multi-page apps without it; the TodoMVC filter does not survive a reload | medium |
 | form serialization on `change` | only the element's value is sent; a multi-field form wants every field | small |
 | loading states (`phx-*-loading`, `disable-with`) | feedback during the round trip; `data-lsc-disconnected` exists | small |
-| `connected` flag / single mount | the dead render and the live render run initialisation twice | small |
 | file uploads | chunked over the socket in LiveView | large |
 
 Suggested order: ignored regions and hooks (they unlock islands, one of the

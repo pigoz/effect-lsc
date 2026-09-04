@@ -231,8 +231,19 @@ export const watch = <A>(source: Watchable<A>): Effect.Effect<A, never, Instance
   Effect.flatMap(Instance, (instance) => Effect.map(instance.slot(subscribe(source, instance)), () => read(source)))
 
 /**
- * Renders a tree to an HTML string with a throwaway session. Handlers are
- * rendered as ids but nothing is listening for them.
+ * `false` during the HTTP render of the page, `true` in the live session.
+ * Both run the component; use it to skip work that only matters live, such
+ * as subscribing to a feed or starting a timer.
+ *
+ * ```ts
+ * if (yield* View.connected) yield* startTicker
+ * ```
+ */
+export const connected: Effect.Effect<boolean, never, Instance> = Effect.map(Instance, (instance) => instance.connected)
+
+/**
+ * Renders a tree to an HTML string with a throwaway, disconnected session.
+ * Handlers are rendered as ids but nothing is listening for them.
  */
 export const render = (child: Child): Effect.Effect<string, unknown> =>
-  Effect.scoped(Effect.flatMap(makeSession, (session) => render_(session, child)))
+  Effect.scoped(Effect.flatMap(makeSession(false), (session) => render_(session, child)))

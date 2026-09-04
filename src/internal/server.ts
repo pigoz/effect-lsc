@@ -69,10 +69,10 @@ const liveContent = (html: string): Child => [
 const page = (component: ComponentFn<{}, unknown, any>, options: MountOptions | undefined) =>
   Effect.scoped(
     Effect.gen(function*() {
-      const session = yield* makeSession
+      const session = yield* makeSession(false)
       const html = yield* render(session, jsx(component, {}))
       const layout = options?.layout ?? defaultLayout(options?.title ?? "effect-lsc")
-      const document = yield* render(yield* makeSession, layout(liveContent(html)))
+      const document = yield* render(yield* makeSession(false), layout(liveContent(html)))
       return HttpServerResponse.html(`<!doctype html>${document}`)
     })
   ).pipe(
@@ -89,7 +89,7 @@ const page = (component: ComponentFn<{}, unknown, any>, options: MountOptions | 
  */
 const live = (component: ComponentFn<{}, unknown, any>, socket: Socket.Socket) =>
   Effect.gen(function*() {
-    const session = yield* makeSession
+    const session = yield* makeSession(true)
     const write = yield* socket.writer
     const inbox = yield* Queue.unbounded<ClientMessage>()
 

@@ -51,7 +51,7 @@ describe("wire", () => {
         const count = yield* View.State(0)
         return <button onClick={() => count.update((n) => n + 1)}>{count.value}</button>
       })
-      const session = yield* makeSession
+      const session = yield* makeSession()
       const first = yield* step(session, <Counter />)
       assert.isDefined(first.patch!.s)
       const button = node(first.patch!.d![0])
@@ -80,7 +80,7 @@ describe("wire", () => {
       const List = (p: { readonly items: ReadonlyArray<[string, boolean]> }) => (
         <ul>{p.items.map(([name, done]) => <Item key={name} name={name} done={done} />)}</ul>
       )
-      const session = yield* makeSession
+      const session = yield* makeSession()
       const first = yield* step(session, <List items={[["a", false], ["b", false], ["c", false]]} />)
       // root node -> List component node -> <ul> slot 0 -> the list
       const listOf = (patch: NodePatch) => list(node(patch.d![0]).d![0])
@@ -141,7 +141,7 @@ describe("wire", () => {
           {p.editing && <Editor />}
         </li>
       )
-      const session = yield* makeSession
+      const session = yield* makeSession()
       yield* step(session, <Row editing={false} />)
       const opened = yield* step(session, <Row editing={true} />)
       // Row's siblings are static, so the conditional is one slot of the Row
@@ -182,7 +182,7 @@ describe("wire", () => {
           </section>
         )
       })
-      const session = yield* makeSession
+      const session = yield* makeSession()
       const set = (todos: ReadonlyArray<{ id: number; title: string; done: boolean }>) => shared.set(todos)
       const click = (type: string, id: string) => dispatch(session, { t: "event", type, id })
       yield* roundTrip(session, <App />, [

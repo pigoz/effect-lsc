@@ -30,7 +30,7 @@ describe("memoization", () => {
           </div>
         )
       })
-      const session = yield* makeSession
+      const session = yield* makeSession()
       const first = yield* renderTree(session, <Parent />)
       assert.deepStrictEqual(runs, { parent: 1, child: 1 })
       // Parent's slots: span handler id, tick text, Child node
@@ -64,7 +64,7 @@ describe("memoization", () => {
         return <li>{p.todo.title}</li>
       }
       const todo = { title: "a" }
-      const session = yield* makeSession
+      const session = yield* makeSession()
       yield* render(session, <ul>{[<Show key="1" todo={todo} />]}</ul>)
       yield* render(session, <ul>{[<Show key="1" todo={todo} />]}</ul>)
       assert.strictEqual(runs, 1)
@@ -95,7 +95,7 @@ describe("memoization", () => {
           </p>
         )
       })
-      const session = yield* makeSession
+      const session = yield* makeSession()
       yield* render(session, <App />)
       yield* shared.set(2)
       const html = yield* render(session, <App />)
@@ -112,7 +112,7 @@ describe("memoization", () => {
       })
       const Branch = () => <div><Leaf /></div>
       const App = (p: { readonly show: boolean }) => <main>{p.show && <Branch />}</main>
-      const session = yield* makeSession
+      const session = yield* makeSession()
       yield* render(session, <App show={true} />)
       yield* render(session, <App show={true} />) // Branch and Leaf reused
       assert.strictEqual(session.instances.size, 3) // App, Branch, Leaf
@@ -144,7 +144,7 @@ describe("memoization", () => {
         merge: (c: unknown, p: unknown) => unknown
         html: (t: unknown, path: string) => string
       })()
-      const session = yield* makeSession
+      const session = yield* makeSession()
       let tree: unknown = null
       const check = (child: Child) =>
         Effect.map(renderTree(session, child), (server) => {

@@ -21,6 +21,11 @@ import type { Node } from "./wire.ts"
 export interface InstanceShape {
   /** Closed when the component leaves the tree or the session ends. */
   readonly scope: Scope.Scope
+  /**
+   * `false` during the HTTP render of the page, `true` in the live session.
+   * Both run the component; use it to skip work that only matters live.
+   */
+  readonly connected: boolean
   /** Returns the slot at the current cursor, creating it on the first render. */
   readonly slot: <A>(create: Effect.Effect<A, never, Scope.Scope>) => Effect.Effect<A>
   /** Marks the instance and its ancestors for re-render and wakes the session. */
@@ -56,6 +61,7 @@ export const makeInstance = (
   type: unknown,
   scope: Scope.Closeable,
   parent: InstanceHandle | undefined,
+  connected: boolean,
   wake: Effect.Effect<void>
 ): InstanceHandle => {
   const slots: Array<unknown> = []
@@ -73,6 +79,7 @@ export const makeInstance = (
     type,
     parent,
     scope,
+    connected,
     slot,
     dirty: true,
     props: undefined,
