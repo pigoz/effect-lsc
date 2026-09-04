@@ -8,6 +8,8 @@ export default defineConfig({
     }
   },
   test: {
-    include: ["test/**/*.test.{ts,tsx}"]
+    include: ["test/**/*.test.{ts,tsx}"],
+    // the browser suite needs Chromium and runs with `bun run test:browser`
+    exclude: ["test/browser/**", "node_modules/**"]
   }
 })
