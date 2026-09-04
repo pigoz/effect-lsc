@@ -5,7 +5,6 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022"],
     "types": ["bun"],
     "moduleDetection": "force",
     "verbatimModuleSyntax": true,

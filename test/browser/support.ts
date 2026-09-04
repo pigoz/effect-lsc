@@ -1,4 +1,3 @@
-/// <reference lib="dom" />
 import { spawn, type ChildProcess } from "node:child_process"
 import { createServer } from "node:net"
 import { fileURLToPath } from "node:url"
