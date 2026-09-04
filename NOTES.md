@@ -226,3 +226,47 @@ thing, which is the reason to keep paths and instances as the core identity.
   (The sliding queue already coalesces, so the gain is small.)
 - Streaming the first render (`HttpServerResponse.htmlStream`) once components
   do slow work.
+
+## Roadmap
+
+What is left, compared with LiveView's client and runtime, in the order
+worth doing it. The primitive itself is done and measured; the first block
+completes it on the DOM side, the second is framework territory.
+
+### Morph
+
+1. **Streams / list operations.** A reorder currently resends the key order
+   (O(n) keys) and morphs the element that holds the list. Send list
+   operations by key instead (insert, move, delete), and anchor the element
+   whose only child is a list, so a reorder morphs single items. The `key`
+   the developer already writes is all that is needed; no DOM ids.
+2. **Ignored regions** (`phx-update="ignore"`): an attribute the morph does
+   not touch, so a client library (editor, map, chart) can own a subtree.
+   With idiomorph it is a `beforeNodeMorphed` callback returning `false`.
+   Prerequisite for islands.
+3. **Element lifecycle hooks** (`phx-hook`: mounted, updated, destroyed):
+   the hook to start client code on a node. With ignored regions this gives
+   minimal islands without any other runtime.
+4. **`<title>` and `<head>` updates.** The layout is static today; idiomorph
+   has a `head` option, only a channel to send them is missing.
+
+Not needed: `phx-value-*` and `phx-target` exist because Elixir handlers are
+event names; closures cover both.
+
+### Runtime
+
+| what | why | cost |
+|---|---|---|
+| debounce / throttle and key filters (`phx-debounce`, `phx-key`) | every `keydown` is a round trip today; the todo editor sends each letter to look for Enter and Escape | small, an option per handler |
+| reconnection with recovery | a reconnect starts a fresh session; LiveView rejoins the same session and recovers forms being filled | medium, needs a session token and a grace period on the server |
+| navigation and URL (`live_patch`, pushState, `handle_params`) | no multi-page apps without it; the TodoMVC filter does not survive a reload | medium |
+| form serialization on `change` | only the element's value is sent; a multi-field form wants every field | small |
+| loading states (`phx-*-loading`, `disable-with`) | feedback during the round trip; `data-lsc-disconnected` exists | small |
+| origin check and CSRF on the socket | upgrades are accepted from any origin | small, and needed before exposing anything |
+| `connected` flag / single mount | the dead render and the live render run initialisation twice | small |
+| file uploads | chunked over the socket in LiveView | large |
+
+Suggested order: streams, ignored regions and hooks (they unlock islands,
+one of the three open questions), debounce and key filters, origin check.
+Then stop and design navigation and reconnection together: both touch the
+session model and should not be bolted on one at a time.
