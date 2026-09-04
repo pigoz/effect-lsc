@@ -12,7 +12,7 @@ import * as Exit from "effect/Exit"
 import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import type * as Events from "./events.ts"
-import type { InstanceHandle } from "./instance.ts"
+import type { InstanceHandle, Owner } from "./instance.ts"
 import type { ClientEvent } from "./protocol.ts"
 import type { Node } from "./wire.ts"
 
@@ -20,7 +20,10 @@ export interface Session {
   readonly scope: Scope.Scope
   readonly dirty: Queue.Queue<void>
   readonly instances: Map<string, InstanceHandle>
-  handlers: ReadonlyMap<string, Events.Handler<any>>
+  /** Handlers by `event:path`, maintained incrementally by the renderer. */
+  readonly handlers: Map<string, Events.Handler<any>>
+  /** Owner of elements and instances outside any component. */
+  readonly root: Owner
   /** The tree the browser has, `undefined` before the first render. */
   tree: Node | undefined
   /** Fingerprints whose statics the browser already has. */
@@ -35,7 +38,15 @@ export const makeSession: Effect.Effect<Session, never, Scope.Scope> = Effect.ge
     scope,
     Effect.suspend(() => Effect.forEach(instances.values(), (instance) => instance.close, { discard: true }))
   )
-  return { scope, dirty, instances, handlers: new Map(), tree: undefined, sentStatics: new Set() }
+  return {
+    scope,
+    dirty,
+    instances,
+    handlers: new Map(),
+    root: { handlerKeys: new Set(), children: new Set() },
+    tree: undefined,
+    sentStatics: new Set()
+  }
 })
 
 export const handlerKey = (event: string, id: string): string => `${event}:${id}`

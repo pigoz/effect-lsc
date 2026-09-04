@@ -21,7 +21,7 @@ import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import type * as Events from "./events.ts"
 import { escapeAttribute, escapeText, renderAttribute, voidElements } from "./html.ts"
-import { Instance, makeInstance } from "./instance.ts"
+import { Instance, type InstanceHandle, makeInstance, type Owner, shallowEqualProps } from "./instance.ts"
 import type { Session } from "./session.ts"
 import { handlerKey } from "./session.ts"
 import type { Child, VNode } from "./vnode.ts"
@@ -31,8 +31,35 @@ import { fingerprint, makeList, toHtml } from "./wire.ts"
 
 interface RenderContext {
   readonly session: Session
-  readonly handlers: Map<string, Events.Handler<any>>
   readonly seen: Set<string>
+  /** The instance (or the session root) whose output is being built. */
+  current: Owner
+}
+
+const registerHandler = (ctx: RenderContext, key: string, handler: Events.Handler<any>): void => {
+  ctx.session.handlers.set(key, handler)
+  ctx.current.handlerKeys.add(key)
+}
+
+/** Forgets the handlers an owner registered in its previous render. */
+const forgetHandlers = (session: Session, owner: Owner): void => {
+  for (const key of owner.handlerKeys) session.handlers.delete(key)
+  owner.handlerKeys.clear()
+}
+
+/** A reused instance keeps its subtree: mark every nested instance as seen. */
+const markSeen = (ctx: RenderContext, owner: Owner): void => {
+  for (const path of owner.children) {
+    ctx.seen.add(path)
+    const child = ctx.session.instances.get(path)
+    if (child !== undefined) markSeen(ctx, child)
+  }
+}
+
+const closeInstance = (session: Session, path: string, instance: InstanceHandle): Effect.Effect<void> => {
+  forgetHandlers(session, instance)
+  session.instances.delete(path)
+  return instance.close
 }
 
 interface Builder {
@@ -159,7 +186,7 @@ const renderElement = (
     const value = node.props[name]
     if (name.startsWith("on") && typeof value === "function") {
       const event = name.slice(2).toLowerCase()
-      ctx.handlers.set(handlerKey(event, path), value as Events.Handler<any>)
+      registerHandler(ctx, handlerKey(event, path), value as Events.Handler<any>)
       pushSlot(b, ` data-lsc-${event}="${escapeAttribute(path)}"`)
       continue
     }
@@ -175,7 +202,9 @@ const renderElement = (
 
 /**
  * Renders a component at `path` into its own node, creating or reusing the
- * instance that lives there.
+ * instance that lives there. An instance that is not dirty and receives the
+ * same props returns the node of its previous render, subtree and handlers
+ * included.
  */
 const buildComponent = (
   ctx: RenderContext,
@@ -185,41 +214,54 @@ const buildComponent = (
   Effect.gen(function*() {
     let instance = ctx.session.instances.get(path)
     if (instance !== undefined && instance.type !== node.type) {
-      yield* instance.close
-      ctx.session.instances.delete(path)
+      yield* closeInstance(ctx.session, path, instance)
       instance = undefined
     }
     if (instance === undefined) {
       const scope = yield* Scope.fork(ctx.session.scope)
-      const invalidate = Effect.asVoid(Queue.offer(ctx.session.dirty, undefined))
-      instance = makeInstance(node.type, scope, invalidate)
+      const parent = ctx.current === ctx.session.root ? undefined : ctx.current as InstanceHandle
+      const wake = Effect.asVoid(Queue.offer(ctx.session.dirty, undefined))
+      instance = makeInstance(node.type, scope, parent, wake)
       ctx.session.instances.set(path, instance)
     }
+    ctx.current.children.add(path)
     ctx.seen.add(path)
+    if (!instance.dirty && instance.node !== undefined && shallowEqualProps(instance.props, node.props)) {
+      markSeen(ctx, instance)
+      return instance.node
+    }
+    forgetHandlers(ctx.session, instance)
+    instance.children.clear()
+    instance.dirty = false
+    instance.props = node.props
     instance.reset()
+    const owner = ctx.current
+    ctx.current = instance
     const result = node.type(node.props)
     const output: Child = Effect.isEffect(result)
       ? yield* Effect.provideService(result as Effect.Effect<Child, unknown, Instance>, Instance, instance)
       : result
     const own = newBuilder()
     yield* renderChildren(ctx, own, output, path, false)
-    return finish(own)
+    ctx.current = owner
+    instance.node = finish(own)
+    return instance.node
   })
 
 /**
- * Renders `child` for `session` into a wire node. Replaces the session's
+ * Renders `child` for `session` into a wire node. Updates the session's
  * handler table and disposes component instances that left the tree.
  */
 export const renderTree = (session: Session, child: Child): Effect.Effect<Node, unknown> =>
   Effect.gen(function*() {
-    const ctx: RenderContext = { session, handlers: new Map(), seen: new Set() }
+    forgetHandlers(session, session.root)
+    session.root.children.clear()
+    const ctx: RenderContext = { session, seen: new Set(), current: session.root }
     const root = newBuilder()
     yield* renderChild(ctx, root, child, rootPath)
-    session.handlers = ctx.handlers
     for (const [path, instance] of session.instances) {
       if (ctx.seen.has(path)) continue
-      session.instances.delete(path)
-      yield* instance.close
+      yield* closeInstance(session, path, instance)
     }
     return finish(root)
   })

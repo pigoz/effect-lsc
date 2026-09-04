@@ -104,7 +104,7 @@ That is the whole integration: TypeScript, Bun and Vite compile `<div/>` to
 
 | | |
 |---|---|
-| `View.Component(function*(props) { … })` | Defines a component. The body is an Effect generator that runs on every render and returns JSX. Plain functions `(props) => JSX` are components too. |
+| `View.Component(function*(props) { … })` | Defines a component. The body is an Effect generator that returns JSX. Plain functions `(props) => JSX` are components too. A component re-runs when its state or a watched ref changes, when a descendant's does, or when it receives different props (shallow comparison); otherwise its previous output is reused. |
 | `View.State(initial)` | Component-local state, persisted across renders. `state.value` reads synchronously; `state.set` / `state.update` are Effects. Backed by a `SubscriptionRef`, exposed as `state.ref`. |
 | `View.watch(ref)` | Reads any `SubscriptionRef` and re-renders whenever it changes. This is how components depend on shared state, for example a service that every session sees. |
 | `View.raw(html)` | Trusted HTML, emitted verbatim. |
@@ -119,6 +119,12 @@ in its type.
 
 Attributes use their HTML names (`class`, `for`). `class` also accepts an
 array with falsy entries, and `style` an object.
+
+Because unchanged components are reused, keep prop identities stable: pass
+the same object for the same item (as `todos.map(t => t.id === id ? {...t, done} : t)`
+does) and a component that reads something outside its props should do so
+through `View.watch` or `View.State`, not by reading a service value
+directly in the body.
 
 ### `effect-lsc/server`
 
@@ -157,7 +163,10 @@ costs only its own slot. This is LiveView's statics/dynamics split, derived
 from the VNode tree at runtime instead of by a template compiler: the
 compiled `jsx()`/`jsxs()` calls already expose the structure and tell static
 siblings from dynamic children. The first render costs the same bytes as the
-HTML; for 1000 todos, toggling one sends 137 bytes instead of 255 KB.
+HTML; for 1000 todos, toggling one sends 137 bytes instead of 255 KB, and
+the server re-runs two component bodies, not a thousand: an instance whose
+state, watched refs, descendants and props are unchanged returns the node of
+its previous render, and the diff skips it by reference.
 
 Every node has a path (`r.0.1`, keyed children `r.0.k42`). Component
 instances live at their path, which is what makes `View.State` persist, and
@@ -190,8 +199,9 @@ bun run build   # vite (ESM) + tsc (declarations) into dist/
 
 ## Status
 
-MVP. Working: server render, live sessions with slot-level patches, local
-state, shared state via `View.watch`, nested keyed components with their own
-state, forms, lists, many event types, cross-session updates. Not yet:
+MVP. Working: server render, live sessions with slot-level patches and
+memoized components, local state, shared state via `View.watch`, nested
+keyed components with their own state, forms, lists, many event types,
+cross-session updates. Not yet:
 islands, state recovery on reconnect, session-level authorization. See
 NOTES.md.

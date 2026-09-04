@@ -58,7 +58,7 @@ computations run twice, and a component that reads the request could see two
 different contexts. LiveView has the same shape (`connected?/1`); a
 `View.connected` flag or a mount-once hook would be the fix.
 
-**Slot-level patches, idiomorph on the client.** A render is a tree of
+**Slot-level patches, memoized instances, idiomorph on the client.** A render is a tree of
 statics and slots (`wire.ts`); the session keeps the tree the browser has and
 sends only changed slots, statics once per fingerprint, lists diffed by
 `key`, components as nested nodes. The browser merges the patch into its
@@ -175,23 +175,40 @@ What the implementation settled:
   comprehensions); items of another shape carry their own fingerprint
 - statics are deduplicated per session by fingerprint
 
-Measured on a todo list, bytes on the wire and milliseconds on the server:
+Measured on a todo list, bytes on the wire and milliseconds on the server
+(toggle one item):
 
-| n | full HTML | first render | toggle one: patch | render | diff |
+| n | full HTML | first render | patch | render | diff |
 |---|---|---|---|---|---|
-| 100 | 25 KB | 1.01× | 136 B | 1.9 ms | 0.3 ms |
-| 1000 | 255 KB | 1.01× | 137 B | 12.6 ms | 1.1 ms |
-| 5000 | 1.29 MB | 1.02× | 138 B | 42 ms | 4.8 ms |
+| 100 | 25 KB | 1.01× | 136 B | 0.4 ms | 0.2 ms |
+| 1000 | 255 KB | 1.01× | 137 B | 1.4 ms | 0.3 ms |
+| 5000 | 1.29 MB | 1.02× | 138 B | 5.8 ms | 1.8 ms |
 
-The first encoding wrapped every list item and every static sibling in its
-own node, which put the first render at 1.8× the HTML; inlining static
-siblings and sharing list statics brought it to the size of the HTML.
+Two steps got here. The first encoding wrapped every list item and every
+static sibling in its own node, which put the first render at 1.8× the HTML;
+inlining static siblings and sharing list statics brought it to the size of
+the HTML and the diff to a third. Then memoization: before it, every render
+re-ran every component body (12.6 ms for 1000 todos, 42 ms for 5000), which
+dominated; now an instance whose state, watched refs, descendants and props
+are unchanged returns its previous node, so the toggle re-runs the item and
+the app, and the diff skips reused nodes by reference.
 
-Still open: memoizing component instances on the server, so that a change
-deep in the tree does not re-run every component body (the render column
-above, which dominates), and morphing only touched subtrees on the client
-(currently the whole root is morphed after every patch). Neither affects
-the wire format.
+**Memoization, precisely.** Invalidation (`View.State` writes, `View.watch`
+changes) marks the instance and its ancestor chain dirty, because a parent's
+cached node embeds its children's nodes; siblings stay reused. Props are
+compared shallowly by identity, so `children` (new VNodes every render)
+defeats memoization, and so does rebuilding item objects that did not
+change. Handlers live in a session table maintained incrementally: a
+re-rendered instance forgets its own keys and registers again, a reused one
+keeps them, a disposed one removes them. Instance GC follows the recorded
+children of reused instances. The semantic change: a component that reads a
+value outside props, state and watched refs no longer picks up changes by
+accident, which is the same contract as LiveView's assigns.
+
+Still open: morphing only touched subtrees on the client (currently the
+whole root is morphed after every patch, so a 1000-item page still walks
+1000 `<li>` in the browser for a 137-byte patch). It needs a DOM anchor per
+component, which the paths already provide, and does not affect the wire.
 
 Fragment boundaries, instance boundaries and island boundaries are the same
 thing, which is the reason to keep paths and instances as the core identity.
