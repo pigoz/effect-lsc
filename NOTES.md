@@ -150,6 +150,49 @@ data, so they can be validated with `Schema` and logged. It coexists with
 `View.State`: a single `View.State<Model>` plus a `dispatch` helper is
 already an Elm program. The MVP does not commit; the primitive supports both.
 
+### Fragments, not whole pages
+
+Sending the whole page on every render is an MVP shortcut. The wire format
+must become fragments, and the current design was shaped so that this is an
+evolution of `render.ts` and the protocol, not a rewrite:
+
+- every node already has a stable path, and component instances live at
+  their path; a fragment is "the output of the instance at path P"
+- the browser runtime patches by morphing, so it can morph a fragment into
+  the subtree at P exactly as it morphs the whole root today
+- the protocol is message based; `{t: "render", html}` becomes
+  `{t: "patch", fragments: [{path, html}]}` without touching anything else
+
+Two steps, both compiler-free:
+
+1. **Per-instance dirtiness.** `Instance.invalidate` marks the instance
+   dirty instead of the whole session. A render pass re-renders only dirty
+   instances top-down (descendants of a dirty ancestor are covered by it),
+   compares each output with the cached previous one, and sends only the
+   fragments that changed. Children whose props are unchanged and are not
+   dirty can reuse their cached output (the LiveComponent `update`
+   optimisation). This needs components to have a single root element, or
+   comment anchors around multi-root output, so the client can find the
+   subtree.
+2. **Statics and dynamics at runtime.** LiveView's diffs come from its
+   template compiler, which we deliberately do not have. But the renderer
+   walks the VNode tree, so instead of a string it can emit a shape (tags,
+   attribute names, child structure) plus a list of values (text and
+   attribute values). The client caches the shape per fingerprint; while
+   the shape of an instance is unchanged, a render sends only the values
+   that differ by index, like LiveView's `{"0": "1"}`. A shape change falls
+   back to the fragment from step 1. Lists and conditionals change shape,
+   so keep instance boundaries small around them.
+
+The alternative to step 2 is a server-side VNode diff producing patch ops
+(set text, set attribute, insert, remove, move) that the client applies
+without morphing. More precise, replaces the morph entirely, but needs the
+previous tree per session and a keyed diff algorithm. Step 2 reuses the
+morph and maps onto a proven model; try it first.
+
+Fragment boundaries, instance boundaries and island boundaries are the same
+thing, which is the reason to keep paths and instances as the core identity.
+
 ### Other
 
 - `View.State` identity by explicit key, to lift the call-order rule.
