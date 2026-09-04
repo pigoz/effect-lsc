@@ -336,37 +336,56 @@ thing, which is the reason to keep paths and instances as the core identity.
 
 ## Roadmap
 
-What is left, compared with LiveView's client and runtime, in the order
-worth doing it. The primitive itself is done and measured; the first block
-completes it on the DOM side, the second is framework territory.
+What is left, in the order agreed. Done so far: the primitive, slot-level
+patches, memoization, subtree morphs, list operations, islands and hooks,
+`View.connected`, origin check, Node and Cloudflare, CI with a Bun/Node
+matrix and a package smoke test, failure semantics with fault injection.
 
-### Morph
+### 1. Session hardening (next)
 
-1. ~~Streams / list operations.~~ Done: removals and insertions by key on
-   the wire, in-place reconciliation by key in the browser. A real reorder
-   still sends the whole key order (O(n) keys); a move encoding is possible
-   if it ever matters.
-2. ~~Ignored regions~~ Done: `data-lsc-ignore`.
-3. ~~Element lifecycle hooks~~ Done: `data-lsc-hook` and `lsc.hook`.
-4. **`<title>` and `<head>` updates.** The layout is static today; idiomorph
-   has a `head` option, only a channel to send them is missing.
+Semantics already decided and documented: disconnect → the session dies →
+reconnect → fresh mount. No resume for now. To add, each with a test in
+the fault fixture (`test/browser/fixtures/faults.tsx`) or a new one:
 
-Not needed: `phx-value-*` and `phx-target` exist because Elixir handlers are
-event names; closures cover both.
+- **Idle timeout**: close sessions with no client message for N minutes.
+  Bun and Node expose `idleTimeout` on their WebSocket options; Cloudflare
+  has none in the classic API, so the session itself needs a timer
+  (`Effect.timeout` around `Queue.take(inbox)` or a heartbeat). A client
+  ping every 30 s from the runtime makes the timeout uniform.
+- **Handler timeout** (`MountOptions.handlerTimeout`, default off?):
+  `Effect.timeout` around the handler; a timeout is reported like a
+  failure. Decide the default with the user.
+- **Max payload**: reject client messages above a size before decoding
+  (Bun `maxPayloadLength`, Node `ws` `maxPayload`, Cloudflare fixed at 1 MB);
+  also check `message.length` in `session` for uniformity.
+- **Max sessions** per process/object: a `Semaphore` or counter in the
+  mount layer; refuse the upgrade with 503 when full.
+- **Backpressure**: the render loop writes patches regardless of the
+  socket's buffer. Bound it: a `Queue.sliding` of outgoing patches, or
+  check `bufferedAmount` where available; a client that cannot keep up
+  should be closed, not grow memory.
+- **Stale events**: already ignored (no handler at the path). Consider a
+  render sequence number in events so a click on a stale DOM can be
+  dropped deliberately instead of hitting the current handler at that
+  position; decide whether that is desirable (LiveView keeps positional).
+- **Reconnect UX**: the runtime reconnects with backoff up to 5 s forever;
+  add a cap and a terminal `data-lsc-dead` state, and document
+  `data-lsc-disconnected` for overlays.
 
-### Runtime
+### 2. Stress and leak tests
 
-| what | why | cost |
-|---|---|---|
-| debounce / throttle and key filters (`phx-debounce`, `phx-key`) | every `keydown` is a round trip today; the todo editor sends each letter to look for Enter and Escape | small, an option per handler |
-| reconnection with recovery | a reconnect starts a fresh session; LiveView rejoins the same session and recovers forms being filled | medium, needs a session token and a grace period on the server |
-| navigation and URL (`live_patch`, pushState, `handle_params`) | no multi-page apps without it; the TodoMVC filter does not survive a reload | medium |
-| form serialization on `change` | only the element's value is sent; a multi-field form wants every field | small |
-| loading states (`phx-*-loading`, `disable-with`) | feedback during the round trip; `data-lsc-disconnected` exists | small |
-| file uploads | chunked over the socket in LiveView | large |
+Before navigation: 100/500/1000 sessions, simultaneous tickers, rapid-fire
+events, connect/disconnect loops, heap that comes back down after GC. A
+script under `scripts/` driving raw sockets against a fixture, measuring
+memory and latency; look for architectural problems while they are cheap.
 
-Suggested order: debounce and key filters, form serialization, then design
-navigation and reconnection together. Streams, ignored regions, hooks,
-islands, `connected` and the origin check are done.
-Then stop and design navigation and reconnection together: both touch the
-session model and should not be bolted on one at a time.
+### 3. Small UX primitives
+
+Form serialization on `change`, keyboard filters and debounce/throttle
+(every `keydown` is a round trip today), `<title>`/`<head>` updates.
+
+### 4. Navigation
+
+Out of the core for as long as possible. At most the hooks a separate
+`effect-lsc/router` would need: URL and history access from a session,
+`handle_params`-like entry, pushState from the server.
