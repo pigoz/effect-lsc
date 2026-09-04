@@ -61,18 +61,18 @@ PORT=4000 bun examples/counter/index.tsx # all examples listen on PORT, default 
 ```
 
 `View.State` is local to a session (a browser tab). To share state across
-tabs, put a `SubscriptionRef` in a service and `View.watch` it, as in
+tabs, put a `View.SharedState` in a service and `View.watch` it, as in
 `examples/shared-counter`:
 
 ```tsx
-class Count extends Context.Service<Count, SubscriptionRef.SubscriptionRef<number>>()("app/Count") {
-  static readonly layer = Layer.effect(Count, SubscriptionRef.make(0))
+class Count extends Context.Service<Count, View.SharedState<number>>()("app/Count") {
+  static readonly layer = Layer.effect(Count, View.SharedState(0))
 }
 
 const Counter = View.Component(function*() {
   const shared = yield* Count
   const total = yield* View.watch(shared) // re-rendered in every tab on change
-  return <button onClick={() => SubscriptionRef.update(shared, (n) => n + 1)}>{total}</button>
+  return <button onClick={() => shared.update((n) => n + 1)}>{total}</button>
 })
 
 HttpRouter.serve(Server.mount("/", Counter)).pipe(Layer.provide(Count.layer), …)
@@ -105,8 +105,9 @@ That is the whole integration: TypeScript, Bun and Vite compile `<div/>` to
 | | |
 |---|---|
 | `View.Component(function*(props) { … })` | Defines a component. The body is an Effect generator that returns JSX. Plain functions `(props) => JSX` are components too. A component re-runs when its state or a watched ref changes, when a descendant's does, or when it receives different props (shallow comparison); otherwise its previous output is reused. |
-| `View.State(initial)` | Component-local state, persisted across renders. `state.value` reads synchronously; `state.set` / `state.update` are Effects. Backed by a `SubscriptionRef`, exposed as `state.ref`. |
-| `View.watch(ref)` | Reads any `SubscriptionRef` and re-renders whenever it changes. This is how components depend on shared state, for example a service that every session sees. |
+| `View.State(initial)` | Component-local state, persisted across renders. `state.value` reads synchronously; `state.set` / `state.update` are Effects that re-render the owner. A plain cell with listeners: no fiber, no lock. Setting the identical value is a no-op. |
+| `View.SharedState(initial)` | State shared by components and, when it lives in a service, by sessions. Same API plus `modify` and a `changes` stream. Backed by a `SubscriptionRef`, so concurrent updates are serialized. |
+| `View.watch(state)` | Reads a `State` received from a parent, a `SharedState`, or (escape hatch) any `SubscriptionRef`, and re-renders the component whenever it changes. The only bridge between Effect state and the component graph. |
 | `View.raw(html)` | Trusted HTML, emitted verbatim. |
 | `View.render(jsx)` | Renders once to an HTML string. Handy in tests. |
 | `View.Instance` | The service that `State` and `watch` need; the renderer provides it. Its `scope` closes when the component leaves the tree. |
@@ -125,8 +126,8 @@ the same object for the same item (as `todos.map(t => t.id === id ? {...t, done}
 does). A component that reads something outside its props must do so
 through `View.watch` or `View.State`, not by reading a service value
 directly in the body. The same applies to a `View.State` handle received as
-a prop: the handle never changes, so read it with `View.watch(handle.ref)`,
-as the TodoMVC footer does with the filter.
+a prop: the handle never changes, so read it with `View.watch(handle)`, as
+the TodoMVC footer does with the filter.
 
 ### `effect-lsc/server`
 
@@ -149,7 +150,7 @@ GET /            → render Component with fresh state → HTML document + runti
 WebSocket /      → new session: render again, send the tree {t:"render", p:{f, s, 0:…}}
 click            → runtime finds data-lsc-click="r.0.1" → {t:"event", type:"click", id:"r.0.1"}
 server           → looks up the handler at that path → runs the Effect
-state change     → SubscriptionRef change → session marked dirty (sliding queue of 1)
+state change     → owner and watching instances invalidated → session marked dirty (sliding queue of 1)
 re-render        → diff against the tree the browser holds → {t:"render", p:{f, 0:{f, 1:"1"}}}
 runtime          → merges the patch, regenerates the touched subtrees, morphs them with idiomorph
 ```
@@ -188,9 +189,9 @@ re-rendered still maps to the current handler at that position.
 
 Effect primitives doing the work: `HttpRouter` and `HttpServerRequest.upgrade`
 for HTTP and WebSocket, `Socket` for the connection, `Scope` for instance and
-session lifetimes, `SubscriptionRef` and `Stream` for state and change
-notification, `Queue.sliding(1)` for render coalescing, `Schema` for the
-wire protocol, `Context.Service` and `Layer` for wiring. There is no custom
+session lifetimes, `SubscriptionRef` and `Stream` for shared state and its
+change notification, `Queue.sliding(1)` for render coalescing, `Schema` for
+the wire protocol, `Context.Service` and `Layer` for wiring. There is no custom
 Promise-based infrastructure.
 
 ## Shutdown

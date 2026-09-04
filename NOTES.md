@@ -36,12 +36,25 @@ calls, same order). The alternative, explicit keys (`View.State("count",
 0)`), is more honest but noisier; the MVP keeps the requested API and
 documents the rule.
 
-**All state is a `SubscriptionRef`.** Local state and shared state are the
-same thing; the only difference is who owns the ref. An instance subscribes
-to the ref's `changes` stream (in its own scope, dropping the replayed
-current value) and offers to the session's dirty queue. So `View.watch` on a
-service-owned ref gives cross-session updates for free: TodoMVC in two tabs
-stays in sync with no extra code.
+**Local state is a cell, shared state is a `SubscriptionRef`, `watch` is
+the bridge.** The first version made every `View.State` a `SubscriptionRef`
+with a `Stream` subscription fiber per cell, for uniformity. Measured: 51 µs
+per cell, ten times the ref itself, all in the stream pipeline; 1000
+components with one state each took 58 ms to render the first time. Local
+state knows exactly whom to invalidate, and handlers of a session run one
+at a time, so it is now a plain cell with a listener set (the owner
+instance, plus any instance that `watch`es the handle): 3.5 µs per cell, 9 ms
+for the same page. Setting the identical value is a no-op. Shared state
+keeps the `SubscriptionRef`, wrapped in `View.SharedState`: there the
+semaphore matters, because handlers of different sessions update it
+concurrently, and its `changes` stream is the fan-out that keeps tabs in
+sync. `View.watch` accepts both, and a raw `SubscriptionRef` as an escape
+hatch; a `Stream` with an initial value is the natural next source
+(database notifications, Redis). It is the only place where Effect
+reactivity meets the component graph: "this instance observed this source
+during its render; when it changes, invalidate it." Effect's
+`unstable/reactivity` `AtomRef` has exactly the cell's shape; it can replace
+the twenty lines here once it is stable, without changing the API.
 
 **Handlers take no services.** `Handler<E>` returns
 `Effect<unknown, unknown, never>`. Services are acquired in the component
@@ -121,10 +134,10 @@ model changes.
 
 What TodoMVC taught:
 
-- A `Context.Service` holding a `SubscriptionRef` plus operations, provided
-  with a `Layer`, is a perfectly good shared store. `View.watch` connects a
-  component to it, and the store's fan-out (`PubSub` under the ref) gives
-  multi-session updates without a message bus.
+- A `Context.Service` holding a `View.SharedState` plus operations,
+  provided with a `Layer`, is a perfectly good shared store. `View.watch`
+  connects a component to it, and the store's fan-out (`PubSub` under the
+  `SubscriptionRef`) gives multi-session updates without a message bus.
 - Derived state did not need anything: it is computed in the body.
 - Passing a `View.State` handle down as a prop (`filter` into `Footer`)
   works for parent-owned state without a context mechanism.

@@ -1,14 +1,14 @@
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
-import { Config, Context, Effect, Layer, SubscriptionRef } from "effect"
+import { Config, Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Server } from "effect-lsc/server"
 import { View } from "effect-lsc/view"
 
-// Shared state is a service: one SubscriptionRef for the whole process,
+// Shared state is a service: one SharedState for the whole process,
 // provided with a Layer. Every session that watches it is re-rendered
 // when it changes, so all open tabs stay in sync.
-class Count extends Context.Service<Count, SubscriptionRef.SubscriptionRef<number>>()("shared-counter/Count") {
-  static readonly layer = Layer.effect(Count, SubscriptionRef.make(0))
+class Count extends Context.Service<Count, View.SharedState<number>>()("shared-counter/Count") {
+  static readonly layer = Layer.effect(Count, View.SharedState(0))
 }
 
 const Counter = View.Component(function*() {
@@ -17,7 +17,7 @@ const Counter = View.Component(function*() {
   const mine = yield* View.State(0) // local to this tab
 
   const increment = Effect.all([
-    SubscriptionRef.update(shared, (n) => n + 1),
+    shared.update((n) => n + 1),
     mine.update((n) => n + 1)
   ])
 

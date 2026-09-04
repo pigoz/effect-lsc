@@ -14,7 +14,7 @@ export const App = View.Component(function*() {
   const todos = yield* Todos
   // Shared state: re-renders this session whenever the list changes,
   // no matter which session (browser tab) changed it.
-  const all = yield* View.watch(todos.ref)
+  const all = yield* View.watch(todos.all)
   // Component-local state: each browser tab has its own filter.
   const filter = yield* View.State<Filter>("all")
 
@@ -109,7 +109,7 @@ const Footer = View.Component(function*(props: {
   const todos = yield* Todos
   // The filter belongs to App. Reading it through `watch` makes this
   // component re-render when it changes; `props.filter.value` would not.
-  const filter = yield* View.watch(props.filter.ref)
+  const filter = yield* View.watch(props.filter)
   return (
     <footer class="footer">
       <span class="todo-count">

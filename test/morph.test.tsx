@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, SubscriptionRef } from "effect"
+import { Effect } from "effect"
 import { View } from "effect-lsc/view"
 import { core } from "../src/internal/browser.ts"
 import { renderTree } from "../src/internal/render.ts"
@@ -39,7 +39,7 @@ describe("subtree morphing", () => {
   it.effect("only the touched anchored subtrees are morphed", () =>
     Effect.gen(function*() {
       type Todo = { id: number; title: string; done: boolean }
-      const shared = yield* SubscriptionRef.make<ReadonlyArray<Todo>>([])
+      const shared = yield* View.SharedState<ReadonlyArray<Todo>>([])
       const Item = View.Component(function*(p: { readonly todo: Todo }) {
         const editing = yield* View.State(false)
         return (
@@ -77,20 +77,20 @@ describe("subtree morphing", () => {
       // App's node is anchored: sections, items, footers carry ids in the HTML
       assert.match(browser.html(tree, "r"), /^<section data-lsc-n="r\.0">/)
       // items appear: the list is reconciled in place, and the footer text changed
-      yield* SubscriptionRef.set(shared, [a, b])
+      yield* shared.set([a, b])
       assert.deepStrictEqual(yield* apply(<App />), ["list:r.0.0", "r.0.1"])
       assert.include(browser.html(tree, "r"), `<li data-lsc-n="r.0.0.k1">`)
       assert.include(browser.html(tree, "r"), `<footer data-lsc-n="r.0.1">`)
       // toggle b: the item's class slot and the footer's text, nothing else
-      yield* SubscriptionRef.set(shared, [a, { ...b, done: true }])
+      yield* shared.set([a, { ...b, done: true }])
       assert.deepStrictEqual(yield* apply(<App />), ["r.0.0.k2", "r.0.1"])
       // local state in a: only that item
       yield* dispatch(session, { t: "event", type: "dblclick", id: "r.0.0.k1.0.0" })
       assert.deepStrictEqual(yield* apply(<App />), ["r.0.0.k1"])
       // reorder: the list alone; the new item of an append is not a morph target
-      yield* SubscriptionRef.set(shared, [{ ...b, done: true }, a])
+      yield* shared.set([{ ...b, done: true }, a])
       assert.deepStrictEqual(yield* apply(<App />), ["list:r.0.0"])
-      yield* SubscriptionRef.set(shared, [{ ...b, done: true }, a, { id: 3, title: "c", done: false }])
+      yield* shared.set([{ ...b, done: true }, a, { id: 3, title: "c", done: false }])
       assert.deepStrictEqual(yield* apply(<App />), ["list:r.0.0", "r.0.1"])
       assert.include(browser.html(tree, "r"), `<li data-lsc-n="r.0.0.k3">`)
       // nothing changed: nothing to morph

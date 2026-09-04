@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, SubscriptionRef } from "effect"
+import { Effect } from "effect"
 import { View } from "effect-lsc/view"
 import { core } from "../src/internal/browser.ts"
 import { renderTree } from "../src/internal/render.ts"
@@ -150,7 +150,7 @@ describe("wire", () => {
 
   it.effect("the browser reproduces the server HTML after every patch", () =>
     Effect.gen(function*() {
-      const shared = yield* SubscriptionRef.make<ReadonlyArray<{ id: number; title: string; done: boolean }>>([])
+      const shared = yield* View.SharedState<ReadonlyArray<{ id: number; title: string; done: boolean }>>([])
       const Item = View.Component(function*(p: { readonly todo: { id: number; title: string; done: boolean } }) {
         const editing = yield* View.State(false)
         return (
@@ -175,7 +175,7 @@ describe("wire", () => {
         )
       })
       const session = yield* makeSession
-      const set = (todos: ReadonlyArray<{ id: number; title: string; done: boolean }>) => SubscriptionRef.set(shared, todos)
+      const set = (todos: ReadonlyArray<{ id: number; title: string; done: boolean }>) => shared.set(todos)
       const click = (type: string, id: string) => dispatch(session, { t: "event", type, id })
       yield* roundTrip(session, <App />, [
         Effect.void,

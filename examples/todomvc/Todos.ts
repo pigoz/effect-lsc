@@ -1,4 +1,5 @@
-import { Context, Effect, Layer, SubscriptionRef } from "effect"
+import { Context, Effect, Layer } from "effect"
+import { View } from "effect-lsc/view"
 
 export interface Todo {
   readonly id: number
@@ -9,10 +10,10 @@ export interface Todo {
 /**
  * Shared application state: one list for the whole process, so every
  * connected browser sees the same todos and every change is pushed to all
- * of them. Components depend on it through `View.watch(todos.ref)`.
+ * of them. Components depend on it through `View.watch(todos.all)`.
  */
 export class Todos extends Context.Service<Todos, {
-  readonly ref: SubscriptionRef.SubscriptionRef<ReadonlyArray<Todo>>
+  readonly all: View.SharedState<ReadonlyArray<Todo>>
   readonly add: (title: string) => Effect.Effect<void>
   readonly toggle: (id: number) => Effect.Effect<void>
   readonly toggleAll: (completed: boolean) => Effect.Effect<void>
@@ -23,19 +24,18 @@ export class Todos extends Context.Service<Todos, {
   static readonly layer = Layer.effect(
     Todos,
     Effect.gen(function*() {
-      const ref = yield* SubscriptionRef.make<ReadonlyArray<Todo>>([])
+      const all = yield* View.SharedState<ReadonlyArray<Todo>>([])
       let nextId = 1
-      const update = (f: (todos: ReadonlyArray<Todo>) => ReadonlyArray<Todo>) => SubscriptionRef.update(ref, f)
       const patch = (id: number, f: (todo: Todo) => Todo) =>
-        update((todos) => todos.map((todo) => todo.id === id ? f(todo) : todo))
+        all.update((todos) => todos.map((todo) => todo.id === id ? f(todo) : todo))
       return Todos.of({
-        ref,
-        add: (title) => update((todos) => [...todos, { id: nextId++, title, completed: false }]),
+        all,
+        add: (title) => all.update((todos) => [...todos, { id: nextId++, title, completed: false }]),
         toggle: (id) => patch(id, (todo) => ({ ...todo, completed: !todo.completed })),
-        toggleAll: (completed) => update((todos) => todos.map((todo) => ({ ...todo, completed }))),
+        toggleAll: (completed) => all.update((todos) => todos.map((todo) => ({ ...todo, completed }))),
         edit: (id, title) => patch(id, (todo) => ({ ...todo, title })),
-        remove: (id) => update((todos) => todos.filter((todo) => todo.id !== id)),
-        clearCompleted: update((todos) => todos.filter((todo) => !todo.completed))
+        remove: (id) => all.update((todos) => todos.filter((todo) => todo.id !== id)),
+        clearCompleted: all.update((todos) => todos.filter((todo) => !todo.completed))
       })
     })
   )

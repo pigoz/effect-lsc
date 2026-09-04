@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Deferred, Effect, Scope, SubscriptionRef } from "effect"
+import { Deferred, Effect, Scope } from "effect"
 import { View } from "effect-lsc/view"
 import { core } from "../src/internal/browser.ts"
 import { render, renderTree } from "../src/internal/render.ts"
@@ -75,7 +75,7 @@ describe("memoization", () => {
 
   it.effect("a watched ref invalidates the ancestors but not the siblings", () =>
     Effect.gen(function*() {
-      const shared = yield* SubscriptionRef.make(1)
+      const shared = yield* View.SharedState(1)
       const runs = { app: 0, watcher: 0, sibling: 0 }
       const Watcher = View.Component(function*() {
         runs.watcher++
@@ -97,7 +97,7 @@ describe("memoization", () => {
       })
       const session = yield* makeSession
       yield* render(session, <App />)
-      yield* SubscriptionRef.set(shared, 2)
+      yield* shared.set(2)
       const html = yield* render(session, <App />)
       assert.strictEqual(html, "<p><b>2</b><i>s</i></p>")
       assert.deepStrictEqual(runs, { app: 2, watcher: 2, sibling: 1 })
@@ -126,7 +126,7 @@ describe("memoization", () => {
   it.effect("the browser still reproduces the server HTML when subtrees are reused", () =>
     Effect.gen(function*() {
       type Todo = { id: number; title: string; done: boolean }
-      const shared = yield* SubscriptionRef.make<ReadonlyArray<Todo>>([])
+      const shared = yield* View.SharedState<ReadonlyArray<Todo>>([])
       const Item = View.Component(function*(p: { readonly todo: Todo }) {
         const editing = yield* View.State(false)
         return (
@@ -156,16 +156,16 @@ describe("memoization", () => {
       const a = { id: 1, title: "a", done: false }
       const b = { id: 2, title: "b", done: false }
       yield* check(<App />)
-      yield* SubscriptionRef.set(shared, [a, b])
+      yield* shared.set([a, b])
       yield* check(<App />)
       // same objects, new order: both items reused
-      yield* SubscriptionRef.set(shared, [b, a])
+      yield* shared.set([b, a])
       yield* check(<App />)
       // local state in a reused item
       yield* dispatch(session, { t: "event", type: "dblclick", id: "r.0.k1.0.0" })
       yield* check(<App />)
       // replace one object, keep the other
-      yield* SubscriptionRef.set(shared, [b, { ...a, done: true }])
+      yield* shared.set([b, { ...a, done: true }])
       yield* check(<App />)
       yield* dispatch(session, { t: "event", type: "blur", id: "r.0.k1.0.1" })
       yield* check(<App />)

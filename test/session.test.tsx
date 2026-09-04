@@ -85,7 +85,51 @@ describe("session", () => {
       assert.strictEqual(session.instances.size, 0)
     }))
 
-  it.effect("View.watch re-renders when an external SubscriptionRef changes", () =>
+  it.effect("a child watching a parent's State handle re-renders; identical values do not", () =>
+    Effect.gen(function*() {
+      const runs = { child: 0 }
+      const Child = View.Component(function*(p: { readonly n: View.State<number> }) {
+        runs.child++
+        const n = yield* View.watch(p.n)
+        return <b>{n}</b>
+      })
+      const Parent = View.Component(function*() {
+        const n = yield* View.State(1)
+        return (
+          <div>
+            <button onClick={() => n.set(2)}>two</button>
+            <button onClick={() => n.set(n.value)}>same</button>
+            <Child n={n} />
+          </div>
+        )
+      })
+      const session = yield* makeSession
+      const first = yield* render(session, <Parent />)
+      assert.include(first, "<b>1</b>")
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.1" })
+      assert.strictEqual(yield* Queue.size(session.dirty), 0)
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.0" })
+      yield* Queue.take(session.dirty)
+      assert.include(yield* render(session, <Parent />), "<b>2</b>")
+      assert.strictEqual(runs.child, 2)
+    }))
+
+  it.effect("View.watch re-renders when a SharedState changes", () =>
+    Effect.gen(function*() {
+      const shared = yield* View.SharedState(1)
+      const Show = View.Component(function*() {
+        const value = yield* View.watch(shared)
+        return <p>{value}</p>
+      })
+      const session = yield* makeSession
+      assert.strictEqual(yield* render(session, <Show />), "<p>1</p>")
+      const doubled = yield* shared.modify((n) => [n * 2, n + 1] as const)
+      assert.strictEqual(doubled, 2)
+      yield* Queue.take(session.dirty)
+      assert.strictEqual(yield* render(session, <Show />), "<p>2</p>")
+    }))
+
+  it.effect("View.watch accepts a raw SubscriptionRef as an escape hatch", () =>
     Effect.gen(function*() {
       const shared = yield* SubscriptionRef.make(1)
       const Show = View.Component(function*() {
