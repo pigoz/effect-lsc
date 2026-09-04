@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "include": ["src", "examples", "test", "vite.config.ts", "vitest.config.ts"],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "types": ["bun"],
+    "moduleDetection": "force",
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "rewriteRelativeImportExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "noErrorTruncation": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "effect-lsc",
+    "paths": {
+      "effect-lsc": ["./src/index.ts"],
+      "effect-lsc/*": ["./src/*.ts"]
+    },
+    "plugins": [{ "name": "@effect/language-service", "namespaceImportPackages": ["effect", "@effect/*"] }]
+  }
+}

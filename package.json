@@ -1,0 +1,58 @@
+{
+  "name": "effect-lsc",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Effect Live Server Components: server-owned, LiveView-style UI with Effect and plain JSX",
+  "license": "MIT",
+  "sideEffects": false,
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./view": {
+      "types": "./dist/view.d.ts",
+      "default": "./dist/view.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./jsx-runtime": {
+      "types": "./dist/jsx-runtime.d.ts",
+      "default": "./dist/jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./dist/jsx-dev-runtime.d.ts",
+      "default": "./dist/jsx-dev-runtime.js"
+    }
+  },
+  "files": [
+    "src/**/*.ts",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map"
+  ],
+  "scripts": {
+    "check": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && vite build && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "counter": "bun examples/counter/index.tsx",
+    "todomvc": "bun examples/todomvc/index.tsx"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "@effect/language-service": "^0.87.2",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@types/bun": "^1.4.0",
+    "effect": "4.0.0-rc.112",
+    "typescript": "7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "4.1.11"
+  }
+}
