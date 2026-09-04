@@ -86,7 +86,7 @@ export const app = <E, R>(component: ComponentFn<{}, E, R>, options: AppOptions<
     const server = pair[1]
     server.accept()
     const socket = await runtime.runPromise(Socket.fromWebSocket(Effect.succeed(server)))
-    runtime.runFork(session(component, socket))
+    runtime.runFork(session(component, socket, options))
     return new Response(null, { status: 101, webSocket: client } as ResponseInit)
   }
   return { fetch, dispose: () => runtime.dispose() }

@@ -72,6 +72,16 @@ export type VNode = Element | ComponentNode | FragmentNode | Raw
 export const Fragment: unique symbol = Symbol.for("effect-lsc/Fragment")
 export type Fragment = typeof Fragment
 
+/**
+ * Marks a component the renderer treats as an error boundary: failures
+ * while rendering its output are caught and `props.fallback(cause)` is
+ * rendered instead. See `View.ErrorBoundary`.
+ */
+export const BoundaryTypeId = "~effect-lsc/ErrorBoundary" as const
+export type BoundaryTypeId = typeof BoundaryTypeId
+
+export const isBoundary = (type: unknown): boolean => typeof type === "function" && BoundaryTypeId in type
+
 export const isVNode = (u: unknown): u is VNode => hasProperty(u, TypeId)
 
 export const raw = (html: string): Raw => ({ [TypeId]: TypeId, _tag: "Raw", html })

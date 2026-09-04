@@ -13,6 +13,7 @@
  * `mount` wires both to an `HttpRouter` path (Bun, Node); the Cloudflare
  * module wires them to a Durable Object.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
@@ -20,7 +21,7 @@ import type * as Scope from "effect/Scope"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
-import type * as Socket from "effect/unstable/socket/Socket"
+import * as Socket from "effect/unstable/socket/Socket"
 import { script } from "./runtime.ts"
 import type { Instance } from "./instance.ts"
 import { type ClientMessage, decodeClientMessage, encodeServerMessage } from "./protocol.ts"
@@ -40,6 +41,12 @@ export interface MountOptions {
    * Requests without an `Origin` header are not browsers and are allowed.
    */
   readonly origins?: ReadonlyArray<string> | ((origin: string) => boolean) | undefined
+  /**
+   * Send failure details (the pretty-printed `Cause`) to the browser in
+   * `error` messages, for development. Off by default: the browser only
+   * learns that a handler or a render failed.
+   */
+  readonly debug?: boolean | undefined
   /**
    * Wraps the live content in a document. Receives the live root and the
    * runtime script; must return the `<html>` element. The layout is static:
@@ -99,31 +106,53 @@ const pageResponse = (component: ComponentFn<{}, unknown, any>, options: MountOp
 
 /**
  * Runs the live session for `component` over `socket`, until the socket
- * closes. Failures are logged; a closed socket is a normal end.
+ * closes.
+ *
+ * Failure semantics:
+ * - a failing event handler is logged and reported to the browser as an
+ *   `error` message; the session and its state survive
+ * - a failing render is reported the same way, then the session ends and
+ *   the socket is closed with code 1011: the browser reconnects and mounts
+ *   a fresh session (use `View.ErrorBoundary` to contain failures instead)
+ * - a closed socket is a normal end; every fiber and instance of the
+ *   session is interrupted and cleaned up with its scope
  */
 export const session = <E, R>(
   component: ComponentFn<{}, E, R>,
-  socket: Socket.Socket
+  socket: Socket.Socket,
+  options?: { readonly debug?: boolean | undefined }
 ): Effect.Effect<void, never, Exclude<R, Instance>> =>
   Effect.gen(function*() {
     const session = yield* makeSession(true)
     const write = yield* socket.writer
     const inbox = yield* Queue.unbounded<ClientMessage>()
+    const describe = (scope: "handler" | "render", cause: Cause.Cause<unknown>) =>
+      options?.debug ? Cause.pretty(cause) : `${scope} failed`
+    const report = (scope: "handler" | "render") => (cause: Cause.Cause<unknown>) =>
+      Effect.ignore(write(encodeServerMessage({ t: "error", scope, message: describe(scope, cause) })))
 
     // Render, diff against the tree the browser has, send only the patch.
+    // A failed render ends the session: report, then close the socket.
     const push = renderTree(session, jsx(component, {})).pipe(
       Effect.flatMap((tree) => {
         const patch = diffNode(session.tree, tree, session.sentStatics)
         session.tree = tree
         return patch === undefined ? Effect.void : write(encodeServerMessage({ t: "render", p: patch }))
       }),
-      Effect.catchCause((cause) => Effect.logError("effect-lsc: render failed", cause))
+      Effect.catchCause((cause) =>
+        Effect.logError("effect-lsc: render failed, ending the session", cause).pipe(
+          Effect.andThen(report("render")(cause)),
+          Effect.andThen(Effect.ignore(write(new Socket.CloseEvent(1011, "render failed"))))
+        )
+      )
     )
 
     // Re-render whenever any watched state changes. Bursts collapse into one.
     yield* Effect.forkScoped(Effect.forever(Effect.andThen(Queue.take(session.dirty), push)))
     // Events are handled one at a time, in arrival order.
-    yield* Effect.forkScoped(Effect.forever(Effect.flatMap(Queue.take(inbox), (event) => dispatch(session, event))))
+    yield* Effect.forkScoped(
+      Effect.forever(Effect.flatMap(Queue.take(inbox), (event) => dispatch(session, event, report("handler"))))
+    )
     // The read loop owns the socket: on some platforms it completes the
     // handshake and only then accepts writes, so the first render goes in
     // onOpen. Runs until the socket closes; closing the scope stops the
@@ -196,7 +225,7 @@ export const mount = <E = never, R = never>(
       ? pageResponse(component, options)
       : !originAllowed(request.headers["origin"], request.headers["host"], options?.origins)
       ? forbidden(request)
-      : Effect.flatMap(request.upgrade, (socket) => Effect.as(session(component, socket), HttpServerResponse.empty()))
+      : Effect.flatMap(request.upgrade, (socket) => Effect.as(session(component, socket, options), HttpServerResponse.empty()))
   ).pipe(
     Effect.catchCause((cause) =>
       Effect.as(

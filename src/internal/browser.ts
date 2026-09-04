@@ -17,6 +17,10 @@
  *   renderer registered with `lsc.island(name, { mount, update, unmount })`
  * - delegates DOM events to elements carrying `data-lsc-<event>` and sends
  *   the handler id plus a small payload (value, checked, key, form fields)
+ * - surfaces server failures: an `error` message sets `data-lsc-error` on
+ *   the root (cleared by the next render) and dispatches an `lsc:error`
+ *   event on `window`; after a render failure the server closes the socket
+ *   and the runtime reconnects into a fresh session
  */
 import { idiomorph } from "./idiomorph.ts"
 
@@ -186,7 +190,13 @@ export const script: string = `${idiomorph}
     };
     ws.onmessage = function (event) {
       var message = JSON.parse(event.data);
-      if (message.t === "render") apply(message.p);
+      if (message.t === "render") {
+        root.removeAttribute("data-lsc-error");
+        apply(message.p);
+      } else if (message.t === "error") {
+        root.setAttribute("data-lsc-error", message.scope);
+        window.dispatchEvent(new CustomEvent("lsc:error", { detail: { scope: message.scope, message: message.message } }));
+      }
     };
     ws.onclose = function () {
       root.setAttribute("data-lsc-disconnected", "");

@@ -110,6 +110,7 @@ That is the whole integration: TypeScript, Bun and Vite compile `<div/>` to
 | `View.State(initial)` | Component-local state, persisted across renders. `state.value` reads synchronously; `state.set` / `state.update` are Effects that re-render the owner. A plain cell with listeners: no fiber, no lock. Setting the identical value is a no-op. |
 | `View.SharedState(initial)` | State shared by components and, when it lives in a service, by sessions. Same API plus `modify` and a `changes` stream. Backed by a `SubscriptionRef`, so concurrent updates are serialized. |
 | `View.watch(state)` | Reads a `State` received from a parent, a `SharedState`, or (escape hatch) any `SubscriptionRef`, and re-renders the component whenever it changes. The only bridge between Effect state and the component graph. |
+| `View.ErrorBoundary` | `<View.ErrorBoundary fallback={(cause) => …}>` catches failures while rendering its children and renders the fallback instead, keeping the rest of the page alive; it retries whenever its subtree changes. |
 | `View.raw(html)` | Trusted HTML, emitted verbatim. |
 | `View.render(jsx)` | Renders once to an HTML string. Handy in tests. |
 | `View.once(effect)` | Runs an Effect once per component instance, in its scope, and returns its result on every render. `View.once(Effect.forkScoped(ticker))` starts a fiber that lives with the component. |
@@ -145,10 +146,36 @@ registers the page:
 - a WebSocket upgrade on the same path runs the live session
 
 Options: `title`, or a `layout: (content) => <html>…</html>` function for a
-custom document (the layout is static, rendered once per page load), and
+custom document (the layout is static, rendered once per page load);
 `origins` for the live session: by default only the page's own origin may
-open it (the `Origin` header must match `Host`); pass a list of origins or
-a predicate to allow others.
+open it (the `Origin` header must match `Host`), pass a list of origins or
+a predicate to allow others; `debug: true` to send failure details to the
+browser during development.
+
+### Failures
+
+The semantics are deterministic and the same on every platform:
+
+- **A handler fails** (typed error or defect): it is logged with its path
+  and event, the browser receives an `error` message, and the session goes
+  on with its state. Changes the handler made before failing stay made,
+  as in any Effect; use `SharedState.modify` or `Effect.uninterruptible`
+  where a change must be all or nothing.
+- **A render fails**: the session ends. The browser receives an `error`
+  message, the server closes the socket with code 1011, and the runtime
+  reconnects into a fresh session, as a crashed LiveView remounts. Wrap the
+  risky part in `View.ErrorBoundary` to contain the failure instead.
+- **The socket closes**, whatever the reason, including in the middle of a
+  handler: the session's scope closes, so every fiber it started (handlers,
+  `View.once` tickers, subscriptions) is interrupted and every component
+  instance is closed. A reconnect is a fresh session; local state does not
+  survive it, shared state does.
+
+In the browser, an `error` message sets `data-lsc-error="handler"` or
+`"render"` on the root until the next render and dispatches an `lsc:error`
+event on `window` with `{ scope, message }`; the message carries the cause
+only with `debug: true`. While disconnected the root has
+`data-lsc-disconnected`.
 
 Services required by the root component must be provided to the router
 layer, as in the TodoMVC example (`Layer.provide(Todos.layer)`).

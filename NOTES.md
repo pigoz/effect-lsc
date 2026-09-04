@@ -99,10 +99,24 @@ source recorded in the copy with the current source, so it cannot go stale
 unnoticed. The page-facing surface is `window.lsc` (morph entry point, and
 the registries hooks and islands will use).
 
-**Handler errors are logged, not fatal.** A failing handler or render logs
-its `Cause` and the session continues. A crashed process in LiveView would
-re-mount; here the session simply keeps its state. Worth revisiting once
-there is an error boundary story.
+**Failure semantics.** A failing handler is logged, reported to the browser
+and survived: its state stays; LiveView would crash the process and lose
+it, and losing a form because one callback threw seemed worse than keeping
+state that a handler changed halfway (documented, with `modify` and
+`uninterruptible` as the tools for atomicity). A failing render ends the
+session, the socket is closed with 1011 and the browser remounts fresh,
+which is LiveView's crash-and-remount: the alternative, keeping a session
+whose page can no longer be rendered, freezes the UI silently. Between the
+two sits `View.ErrorBoundary`, a component the renderer knows: a failure
+under it renders the fallback and, because invalidation climbs to
+ancestors, any change in the subtree retries it. A subtle bug surfaced
+here: a failed render used to leave its instance not dirty with the old
+node, so memoization could serve a stale subtree whose handlers were gone;
+a failed instance is now dirty and node-less. Fault injection lives at all
+three layers (unit, protocol, browser): failing handlers and defects,
+failing renders in and out of a boundary, and a disconnect in the middle
+of a slow handler, verified through the server's own log lines for
+interruption and cleanup.
 
 ## Platforms
 

@@ -16,6 +16,7 @@
  * `key` or index. Components become nested nodes, so a component is a unit
  * of both identity and patching.
  */
+import type * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
@@ -25,7 +26,7 @@ import { Instance, type InstanceHandle, makeInstance, type Owner, shallowEqualPr
 import type { Session } from "./session.ts"
 import { handlerKey } from "./session.ts"
 import type { Child, VNode } from "./vnode.ts"
-import { isVNode } from "./vnode.ts"
+import { isBoundary, isVNode } from "./vnode.ts"
 import type { Dyn, Node } from "./wire.ts"
 import { fingerprint, makeList, toHtml } from "./wire.ts"
 
@@ -239,15 +240,44 @@ const buildComponent = (
     instance.reset()
     const owner = ctx.current
     ctx.current = instance
-    const result = node.type(node.props)
-    const output: Child = Effect.isEffect(result)
-      ? yield* Effect.provideService(result as Effect.Effect<Child, unknown, Instance>, Instance, instance)
-      : result
-    const own = newBuilder()
-    yield* renderChildren(ctx, own, output, path, false)
-    ctx.current = owner
-    instance.node = finish(own, isElement(output))
-    return instance.node
+    const current = instance
+    const body = Effect.gen(function*() {
+      const result = node.type(node.props)
+      const output: Child = Effect.isEffect(result)
+        ? yield* Effect.provideService(result as Effect.Effect<Child, unknown, Instance>, Instance, current)
+        : result
+      const own = newBuilder()
+      yield* renderChildren(ctx, own, output, path, false)
+      return finish(own, isElement(output))
+    })
+    const rendered = isBoundary(node.type)
+      ? Effect.catchCause(body, (cause) =>
+        Effect.gen(function*() {
+          // The subtree failed: render the fallback in its place. The
+          // boundary re-renders (and retries) when its subtree changes.
+          const fallback = (node.props as { readonly fallback: (cause: Cause.Cause<unknown>) => Child }).fallback(cause)
+          const own = newBuilder()
+          yield* renderChildren(ctx, own, fallback, path, false)
+          return finish(own, isElement(fallback))
+        }))
+      : body
+    return yield* rendered.pipe(
+      Effect.tapCause(() =>
+        Effect.sync(() => {
+          // A failed render must not be memoized: forget the node and stay
+          // dirty, so the next render runs the body again.
+          current.dirty = true
+          current.node = undefined
+        })
+      ),
+      Effect.ensuring(Effect.sync(() => {
+        ctx.current = owner
+      })),
+      Effect.map((own) => {
+        current.node = own
+        return own
+      })
+    )
   })
 
 /**

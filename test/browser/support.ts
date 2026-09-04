@@ -21,7 +21,7 @@ const command = (file: string): [string, Array<string>] =>
   runtime === "node" ? ["node", ["--import", "tsx", file]] : ["bun", [file]]
 
 /** Starts a fixture on a free port with the selected runtime and waits for it. */
-export const startServer = async (file: string): Promise<{ url: string; stop: () => Promise<void> }> => {
+export const startServer = async (file: string): Promise<{ url: string; stop: () => Promise<void>; log: () => string }> => {
   const port = await freePort()
   const [bin, args] = command(file)
   const child: ChildProcess = spawn(bin, args, { cwd: root, env: { ...process.env, PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"] })
@@ -33,7 +33,13 @@ export const startServer = async (file: string): Promise<{ url: string; stop: ()
   while (Date.now() < deadline) {
     try {
       const response = await fetch(url)
-      if (response.ok) return { url, stop: () => new Promise((resolve) => { child.once("exit", () => resolve()); child.kill("SIGINT") }) }
+      if (response.ok) {
+        return {
+          url,
+          stop: () => new Promise((resolve) => { child.once("exit", () => resolve()); child.kill("SIGINT") }),
+          log: () => log
+        }
+      }
     } catch {}
     if (child.exitCode !== null) break
     await new Promise((r) => setTimeout(r, 100))

@@ -56,9 +56,15 @@ export const handlerKey = (event: string, id: string): string => `${event}:${id}
 
 /**
  * Runs the handler registered for a client event. Unknown ids are ignored:
- * they usually belong to a DOM that has since been re-rendered.
+ * they usually belong to a DOM that has since been re-rendered. A failing
+ * handler (typed error or defect) is logged and passed to `report`; the
+ * session goes on. State it changed before failing stays changed.
  */
-export const dispatch = (session: Session, event: ClientEvent): Effect.Effect<void> =>
+export const dispatch = (
+  session: Session,
+  event: ClientEvent,
+  report: (cause: Cause.Cause<unknown>) => Effect.Effect<void> = () => Effect.void
+): Effect.Effect<void> =>
   Effect.suspend(() => {
     const handler = session.handlers.get(handlerKey(event.type, event.id))
     if (handler === undefined) {
@@ -72,7 +78,10 @@ export const dispatch = (session: Session, event: ClientEvent): Effect.Effect<vo
       Effect.exit,
       Effect.flatMap((exit) =>
         Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
-          ? Effect.logError(`effect-lsc: ${event.type} handler at ${event.id} failed`, exit.cause)
+          ? Effect.andThen(
+            Effect.logError(`effect-lsc: ${event.type} handler at ${event.id} failed`, exit.cause),
+            report(exit.cause)
+          )
           : Effect.void
       )
     )

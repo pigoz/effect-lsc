@@ -10,6 +10,7 @@
  * Components run on the server and re-run when their state changes; the
  * resulting patches are merged into the page by the browser runtime.
  */
+import type * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import { identity } from "effect/Function"
 import type * as Scope from "effect/Scope"
@@ -19,7 +20,7 @@ import { Instance } from "./instance.ts"
 import { render as render_ } from "./render.ts"
 import { makeSession } from "./session.ts"
 import type { Child } from "./vnode.ts"
-import { Fragment as Fragment_, raw as raw_ } from "./vnode.ts"
+import { BoundaryTypeId, Fragment as Fragment_, raw as raw_ } from "./vnode.ts"
 
 export type {
   EventBase,
@@ -40,6 +41,24 @@ export { Instance } from "./instance.ts"
 export const raw: (html: string) => import("./vnode.ts").Raw = raw_
 
 export const Fragment: typeof Fragment_ = Fragment_
+
+/**
+ * Catches failures while rendering its children and renders
+ * `fallback(cause)` instead, keeping the rest of the page alive. The
+ * boundary re-renders, and so retries, whenever its subtree changes.
+ * Without a boundary, a render failure ends the session and the browser
+ * remounts a fresh one.
+ *
+ * ```tsx
+ * <View.ErrorBoundary fallback={(cause) => <p>Something broke</p>}>
+ *   <Risky />
+ * </View.ErrorBoundary>
+ * ```
+ */
+export const ErrorBoundary: (props: {
+  readonly fallback: (cause: Cause.Cause<unknown>) => Child
+  readonly children?: Child
+}) => Child = Object.assign((props: { readonly children?: Child }) => props.children, { [BoundaryTypeId]: BoundaryTypeId })
 
 /**
  * Defines a component from a generator body. The body runs when the
