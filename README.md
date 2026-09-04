@@ -239,11 +239,17 @@ resolves once a socket was upgraded.
 ## Development
 
 ```sh
-bun run check    # tsc
-bun run test     # vitest
-bun run build    # vite (ESM) + tsc (declarations) into dist/
-bun run runtime  # regenerate the minified browser runtime and vendored idiomorph
+bun run check         # tsc, for the sources and for the declarations build
+bun run test          # vitest: renderer, wire protocol, memoization, the browser's merge code
+bun run test:browser  # vitest + Playwright: the runtime in Chromium, against a fixture page and the examples
+bun run build         # vite (ESM) + tsc (declarations) into dist/
+bun run runtime       # regenerate the minified browser runtime and vendored idiomorph
 ```
+
+The browser tests need a browser: `bunx playwright install chromium`, or an
+installed Google Chrome, which they fall back to. They cover what unit tests
+cannot: which elements a patch morphs, element identity across list
+operations, focus and typed input, form reset, islands and hooks.
 
 The browser runtime is written readably in `src/internal/browser.ts` and
 inlined from `src/internal/runtime.ts`, a generated, minified copy; a test

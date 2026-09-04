@@ -104,6 +104,22 @@ its `Cause` and the session continues. A crashed process in LiveView would
 re-mount; here the session simply keeps its state. Worth revisiting once
 there is an error boundary story.
 
+## Testing
+
+Three layers. Unit tests (`bun run test`) cover the renderer, the wire
+protocol, memoization and, by evaluating the runtime's own merge code, the
+browser's side of the protocol: a round trip where the client reproduces the
+server HTML after every patch. Browser tests (`bun run test:browser`) run
+the real runtime in Chromium against `test/browser/fixtures/app.tsx`, a
+page with no network dependency that exercises every behaviour the runtime
+must keep, and against the examples. Every bug found by hand has a test at
+the layer where it lives: the single-child path collision (unit), a
+memoized child reading a `State` prop (unit, and the TodoMVC footer in the
+browser), idiomorph's `ignoreActiveValue` skipping a focused button's label
+(browser), element identity across list operations (browser). `bun run
+check` type-checks the declarations build too, since it has neither DOM nor
+Node types and once broke on the `URL` global.
+
 ## Known limitations
 
 - Reconnecting starts a new session: state is lost. LiveView has the same

@@ -57,10 +57,11 @@
     "dist/**/*.d.ts.map"
   ],
   "scripts": {
-    "check": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json && tsc -p tsconfig.build.json --outDir .check && rm -rf .check",
     "runtime": "bun scripts/build-runtime.ts && bun scripts/vendor-idiomorph.ts",
     "build": "rm -rf dist && vite build && tsc -p tsconfig.build.json",
     "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
     "counter": "bun examples/counter/index.tsx",
     "shared-counter": "bun examples/shared-counter/index.tsx",
     "todomvc": "bun examples/todomvc/index.tsx",
@@ -77,6 +78,7 @@
     "@types/bun": "^1.4.0",
     "effect": "4.0.0-rc.112",
     "idiomorph": "0.7.4",
+    "playwright": "1.62.1",
     "typescript": "7.0.2",
     "vite": "^8.2.2",
     "vitest": "4.1.11"

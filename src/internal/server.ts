@@ -164,7 +164,7 @@ const forbidden = (request: HttpServerRequest.HttpServerRequest) =>
  * )
  * ```
  */
-export const mount = <E, R>(
+export const mount = <E = never, R = never>(
   path: HttpRouter.PathInput,
   component: ComponentFn<{}, E, R>,
   options?: MountOptions
