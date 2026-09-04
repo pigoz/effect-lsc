@@ -107,6 +107,9 @@ const Footer = View.Component(function*(props: {
   readonly filter: View.State<Filter>
 }) {
   const todos = yield* Todos
+  // The filter belongs to App. Reading it through `watch` makes this
+  // component re-render when it changes; `props.filter.value` would not.
+  const filter = yield* View.watch(props.filter.ref)
   return (
     <footer class="footer">
       <span class="todo-count">
@@ -116,7 +119,7 @@ const Footer = View.Component(function*(props: {
         {filters.map((f) => (
           <li key={f.id}>
             <a
-              class={props.filter.value === f.id ? "selected" : undefined}
+              class={filter === f.id ? "selected" : undefined}
               href={`#/${f.id}`}
               onClick={() => props.filter.set(f.id)}
             >

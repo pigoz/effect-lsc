@@ -122,9 +122,11 @@ array with falsy entries, and `style` an object.
 
 Because unchanged components are reused, keep prop identities stable: pass
 the same object for the same item (as `todos.map(t => t.id === id ? {...t, done} : t)`
-does) and a component that reads something outside its props should do so
+does). A component that reads something outside its props must do so
 through `View.watch` or `View.State`, not by reading a service value
-directly in the body.
+directly in the body. The same applies to a `View.State` handle received as
+a prop: the handle never changes, so read it with `View.watch(handle.ref)`,
+as the TodoMVC footer does with the filter.
 
 ### `effect-lsc/server`
 
