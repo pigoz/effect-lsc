@@ -1,6 +1,6 @@
 {
   "name": "effect-lsc",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "description": "Effect Live Server Components: server-owned, LiveView-style UI with Effect and plain JSX",
   "license": "MIT",
