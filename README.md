@@ -6,20 +6,20 @@ Phoenix LiveView, built on [Effect](https://effect.website) v4 and plain JSX.
 - components execute on the server, as Effects
 - state lives on the server
 - JSX describes the UI; event callbacks stay on the server
-- the browser runs one small, generic runtime (15 KB inlined, 5.5 KB gzipped, of which 9.5 KB are [idiomorph](https://github.com/bigskysoftware/idiomorph))
+- the browser runs one small, generic runtime (17.1 KB inlined, 6.2 KB gzipped),
+  including [idiomorph](https://github.com/bigskysoftware/idiomorph) (9.7 KB minified before bundling)
 - events travel to the server over a WebSocket and come back as DOM updates
 - no React, no compiler plugin, no bundler integration: normal TypeScript JSX
   compilation is enough
 
 This is an MVP whose goal is to find the smallest useful primitive for
-LiveView-style applications with Effect. See [NOTES.md](./NOTES.md) for the
-design, the trade-offs, and the open questions.
+LiveView-style applications with Effect.
 
 ## A counter
 
 ```tsx
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
-import { Config, Layer } from "effect"
+import { Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Server } from "effect-lsc/server"
 import { View } from "effect-lsc/view"
@@ -48,6 +48,51 @@ The page the browser receives contains `<h1>0</h1>`, a button with
 `data-lsc-click="r.0.1"`, and the runtime. It does not contain the counter,
 its state, or the callback.
 
+## A shared counter
+
+`View.State` belongs to one component in one browser session. To share a
+counter across tabs, create a `View.SharedState` in a service and read it
+with `View.watch`. Each change then re-renders every component watching it.
+
+The same application with a shared count:
+
+```tsx
+import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
+import { Context, Layer } from "effect"
+import { HttpRouter } from "effect/unstable/http"
+import { Server } from "effect-lsc/server"
+import { View } from "effect-lsc/view"
+
+class Count extends Context.Service<Count, View.SharedState<number>>()("app/Count") {
+  static readonly layer = Layer.effect(Count, View.SharedState(0))
+}
+
+const Counter = View.Component(function*() {
+  const shared = yield* Count
+  const total = yield* View.watch(shared)
+
+  return (
+    <button onClick={() => shared.update((n) => n + 1)}>
+      {total}
+    </button>
+  )
+})
+
+const App = Server.mount("/", Counter, { title: "Shared counter" })
+
+HttpRouter.serve(App).pipe(
+  Layer.provide(Count.layer),
+  Layer.provide(BunHttpServer.layer({ port: 3000, disablePreemptiveShutdown: true })),
+  Layer.launch,
+  BunRuntime.runMain
+)
+```
+
+The service owns the count; the components subscribe to it. In this example,
+all tabs connected to the same server process share one counter. See the
+[complete example](./examples/shared-counter/index.tsx) for a shared total
+alongside a count local to each tab.
+
 ## Running the examples
 
 ```sh
@@ -62,24 +107,6 @@ bun run todomvc-cloudflare              # shared TodoMVC in a Durable Object
 
 The Bun examples listen on port 3000 and require Bun 1.4.1 or later.
 The Cloudflare examples run under `wrangler dev` (port 8787 by default).
-
-`View.State` is local to a session (a browser tab). To share state across
-tabs, put a `View.SharedState` in a service and `View.watch` it, as in
-`examples/shared-counter`:
-
-```tsx
-class Count extends Context.Service<Count, View.SharedState<number>>()("app/Count") {
-  static readonly layer = Layer.effect(Count, View.SharedState(0))
-}
-
-const Counter = View.Component(function*() {
-  const shared = yield* Count
-  const total = yield* View.watch(shared) // re-rendered in every tab on change
-  return <button onClick={() => shared.update((n) => n + 1)}>{total}</button>
-})
-
-HttpRouter.serve(Server.mount("/", Counter)).pipe(Layer.provide(Count.layer), …)
-```
 
 ## Setup in your own project
 
@@ -101,258 +128,53 @@ bun add effect-lsc effect @effect/platform-bun
 That is the whole integration: TypeScript, Bun and Vite compile `<div/>` to
 `jsx("div", …)` imported from `effect-lsc/jsx-runtime`.
 
-## API
+The examples above use Bun. The same components run on Node with
+`@effect/platform-node`, or in Cloudflare Durable Objects with
+`effect-lsc/cloudflare`; see [platform integration](./ARCHITECTURE.md#platform-integration).
 
-### `effect-lsc/view`
+## API & How it works
 
-| | |
-|---|---|
-| `View.Component(function*(props) { … })` | Defines a component. The body is an Effect generator that returns JSX. Plain functions `(props) => JSX` are components too. A component re-runs when its state or a watched ref changes, when a descendant's does, or when it receives different props (shallow comparison); otherwise its previous output is reused. |
-| `View.State(initial)` | Component-local state, persisted across renders. `state.value` reads synchronously; `state.set` / `state.update` are Effects that re-render the owner. A plain cell with listeners: no fiber, no lock. Setting the identical value is a no-op. |
-| `View.SharedState(initial)` | State shared by components and, when it lives in a service, by sessions. Same API plus `modify` and a `changes` stream. Backed by a `SubscriptionRef`, so concurrent updates are serialized. |
-| `View.watch(state)` | Reads a `State` received from a parent, a `SharedState`, or (escape hatch) any `SubscriptionRef`, and re-renders the component whenever it changes. The only bridge between Effect state and the component graph. |
-| `View.ErrorBoundary` | `<View.ErrorBoundary fallback={(cause) => …}>` catches failures while rendering its children and renders the fallback instead, keeping the rest of the page alive; it retries whenever its subtree changes. |
-| `View.raw(html)` | Trusted HTML, emitted verbatim. |
-| `View.render(jsx)` | Renders once to an HTML string. Handy in tests. |
-| `View.once(effect)` | Runs an Effect once per component instance, in its scope, and returns its result on every render. `View.once(Effect.forkScoped(ticker))` starts a fiber that lives with the component. |
-| `View.connected` | `false` during the HTTP render of the page, `true` in the live session. Both run the component; skip work that only matters live (timers, subscriptions). |
-| `View.Instance` | The service that `State` and `watch` need; the renderer provides it. Its `scope` closes when the component leaves the tree. |
-
-Event handlers receive a small, generic event: `{ type, value?, checked?,
-key?, form? }`. A handler may return an Effect, which the session runs, or
-nothing. Handlers cannot require services: acquire them in the component
-body with `yield*` and close over them, so a page's requirements stay visible
-in its type.
-
-Attributes use their HTML names (`class`, `for`). `class` also accepts an
-array with falsy entries, and `style` an object.
-
-Because unchanged components are reused, keep prop identities stable: pass
-the same object for the same item (as `todos.map(t => t.id === id ? {...t, done} : t)`
-does). A component that reads something outside its props must do so
-through `View.watch` or `View.State`, not by reading a service value
-directly in the body. The same applies to a `View.State` handle received as
-a prop: the handle never changes, so read it with `View.watch(handle)`, as
-the TodoMVC footer does with the filter.
-
-### `effect-lsc/server`
-
-`Server.page(Component, options?)` renders the document once, and
-`Server.session(Component, socket)` runs the live loop over any Effect
-`Socket`; both are platform independent. `Server.mount(path, Component,
-options?)` wires them to an `HttpRouter` (Bun, Node) as a `Layer` that
-registers the page:
-
-- `GET path` renders the component once and returns a full document
-- a WebSocket upgrade on the same path runs the live session
-
-Options: `title`, or a `layout: (content) => <html>…</html>` function for a
-custom document (the layout is static, rendered once per page load);
-`origins` for the live session: by default only the page's own origin may
-open it (the `Origin` header must match `Host`), pass a list of origins or
-a predicate to allow others; `debug: true` to send failure details to the
-browser during development.
-
-### Failures
-
-The semantics are deterministic and the same on every platform:
-
-- **A handler fails** (typed error or defect): it is logged with its path
-  and event, the browser receives an `error` message, and the session goes
-  on with its state. Changes the handler made before failing stay made,
-  as in any Effect; use `SharedState.modify` or `Effect.uninterruptible`
-  where a change must be all or nothing.
-- **A render fails**: the session ends. The browser receives an `error`
-  message, the server closes the socket with code 1011, and the runtime
-  reconnects into a fresh session, as a crashed LiveView remounts. Wrap the
-  risky part in `View.ErrorBoundary` to contain the failure instead.
-- **The socket closes**, whatever the reason, including in the middle of a
-  handler: the session's scope closes, so every fiber it started (handlers,
-  `View.once` tickers, subscriptions) is interrupted and every component
-  instance is closed. A reconnect is a fresh session; local state does not
-  survive it, shared state does.
-
-In the browser, an `error` message sets `data-lsc-error="handler"` or
-`"render"` on the root until the next render and dispatches an `lsc:error`
-event on `window` with `{ scope, message }`; the message carries the cause
-only with `debug: true`. While disconnected the root has
-`data-lsc-disconnected`.
-
-Services required by the root component must be provided to the router
-layer, as in the TodoMVC example (`Layer.provide(Todos.layer)`).
-
-The library is runtime independent. On Bun:
-
-```ts
-HttpRouter.serve(App).pipe(
-  Layer.provide(BunHttpServer.layer({ port: 3000, disablePreemptiveShutdown: true })),
-  Layer.launch,
-  BunRuntime.runMain
-)
-```
-
-On Node, with `@effect/platform-node`:
-
-```ts
-import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
-import { createServer } from "node:http"
-
-HttpRouter.serve(App).pipe(
-  Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 })),
-  Layer.launch,
-  NodeRuntime.runMain
-)
-```
-
-On Cloudflare, see `effect-lsc/cloudflare` below.
-
-### `effect-lsc/cloudflare`
-
-`Cloudflare.app(Component, { layer, ...options })` returns a `fetch`
-handler for a Durable Object. A GET renders the page; a WebSocket upgrade
-becomes a live session running as a fiber inside the object. The services
-in `layer` are built once per object, so a `View.SharedState` in a service
-is shared by every tab routed to that object: the Durable Object is the
-room.
-
-```ts
-import { DurableObject } from "cloudflare:workers"
-import { Cloudflare } from "effect-lsc/cloudflare"
-
-export class Room extends DurableObject {
-  readonly app = Cloudflare.app(Counter, { layer: Count.layer, title: "Counter" })
-  override fetch(request: Request) {
-    return this.app.fetch(request)
-  }
-}
-
-export default {
-  fetch(request: Request, env: Env) {
-    return env.ROOM.get(env.ROOM.idFromName("global")).fetch(request)
-  }
-}
-```
-
-See `examples/shared-counter-cloudflare` and `examples/todomvc-cloudflare`.
-Each contains its own application code and Wrangler configuration. The todo
-list is shared within one object and kept in memory, not persisted to storage.
-Sessions keep their state in memory, so this uses the classic `accept()` API rather than
-WebSocket hibernation; the object stays alive while sockets are open.
-
-### `effect-lsc/island`
-
-`<Island name="Chart" props={{ values }}>` is a boundary where a client-side
-renderer owns the DOM. The server renders a container with the name and the
-props as JSON around a mount point the runtime never morphs; the page
-registers the renderer:
-
-```html
-<script type="module">
-  import { createRoot } from "https://esm.sh/react-dom@19/client"
-  window.lsc.island("Chart", {
-    mount(element, props) {
-      const root = createRoot(element)
-      root.render(<Chart {...props} />)
-      return { update: (props) => root.render(<Chart {...props} />), unmount: () => root.unmount() }
-    }
-  })
-</script>
-```
-
-`mount` runs when the island enters the page, `update` whenever the server
-changes the props, `unmount` when it leaves. React's own state survives every
-server patch; see `examples/react-island`. Underneath are two generic
-attributes any element can use: `data-lsc-ignore` marks a subtree the
-runtime never touches, and `data-lsc-hook="name"` runs the `mounted`,
-`updated` and `destroyed` callbacks registered with `window.lsc.hook(name, …)`.
-
-## How it works
-
-```
-GET /            → render Component with fresh state → HTML document + runtime
-WebSocket /      → new session: render again, send the tree {t:"render", p:{f, s, 0:…}}
-click            → runtime finds data-lsc-click="r.0.1" → {t:"event", type:"click", id:"r.0.1"}
-server           → looks up the handler at that path → runs the Effect
-state change     → owner and watching instances invalidated → session marked dirty (sliding queue of 1)
-re-render        → diff against the tree the browser holds → {t:"render", p:{f, 0:{f, 1:"1"}}}
-runtime          → merges the patch, regenerates the touched subtrees, morphs them with idiomorph
-```
-
-A render is a tree of nodes: static strings (tags, attribute names,
-structure, literal sibling lists) interleaved with slots (text, attribute
-values, handler ids, nested nodes, lists). Statics are identified by a
-fingerprint and travel once per session; after that only slots whose value
-changed are sent. Dynamic arrays (`{items.map(…)}`) are lists diffed by
-`key`, so a reorder sends the new key order and nothing else, and items
-share their statics. Components are nested nodes, so a conditional component
-costs only its own slot. This is LiveView's statics/dynamics split, derived
-from the VNode tree at runtime instead of by a template compiler: the
-compiled `jsx()`/`jsxs()` calls already expose the structure and tell static
-siblings from dynamic children. The first render costs the same bytes as the
-HTML; for 1000 todos, toggling one sends 137 bytes instead of 255 KB, and
-the server re-runs two component bodies, not a thousand: an instance whose
-state, watched refs, descendants and props are unchanged returns the node of
-its previous render, and the diff skips it by reference. In the browser,
-nodes whose HTML is a single element carry an anchor (`data-lsc-n`, added
-by the runtime, never sent), and only the anchored subtrees a patch touched
-are morphed: toggling a todo morphs its `<li>` and the footer. A list whose
-keys changed sends removals and insertions by key (the whole order only
-when kept items moved) and is reconciled in place: existing elements are
-moved, new ones created, missing ones removed, nothing else is touched.
-Adding a todo morphs only the footer; filtering morphs nothing.
-
-Two tips that follow from this: a component is the unit of memoization and
-of morphing, so wrap a dynamic list or a large conditional subtree in a
-component of its own, and keep it a single root element.
-
-Every node has a path (`r.0.1`, keyed children `r.0.k42`). Component
-instances live at their path, which is what makes `View.State` persist, and
-handler ids are element paths, so an event from a DOM that has since been
-re-rendered still maps to the current handler at that position.
-
-Effect primitives doing the work: `HttpRouter` and `HttpServerRequest.upgrade`
-for HTTP and WebSocket, `Socket` for the connection, `Scope` for instance and
-session lifetimes, `SubscriptionRef` and `Stream` for shared state and its
-change notification, `Queue.sliding(1)` for render coalescing, `Schema` for
-the wire protocol, `Context.Service` and `Layer` for wiring. There is no custom
-Promise-based infrastructure.
-
-## Shutdown
-
-The examples pass `disablePreemptiveShutdown: true` to the Bun server layer,
-so Ctrl+C exits immediately: live sessions are interrupted first, their
-WebSockets close, then the server stops. With the default settings
-`BunHttpServer` waits up to 20 seconds for the sockets before interrupting
-anything. This needs Bun 1.4.1 or later; on older Bun the stop never
-resolves once a socket was upgraded.
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the API, session lifecycle,
+error handling and rendering protocol.
 
 ## Development
 
 ```sh
-bun run check         # tsc: sources, the declarations build, the Cloudflare example
-bun run test          # vitest: renderer, wire protocol, memoization, the browser's merge code
-bun run test:browser  # vitest + Playwright: the runtime in Chromium against test fixtures (which reuse the
-                      # example components), the protocol over raw sockets, the Durable Object under wrangler dev
-bun run test:node     # the same, with the fixtures running on Node instead of Bun
-bun run build         # vite (ESM) + tsc (declarations) into dist/
-bun run smoke         # pack, install the tarball in a temp project, render through dist/ with Bun and Node
-bun run runtime       # regenerate the minified browser runtime and vendored idiomorph
+bun run check         # type-check sources, declarations and both Cloudflare examples
+bun run test          # unit tests for rendering, state and the wire protocol
+bun run test:browser  # Chromium tests, WebSocket protocol tests and local Wrangler tests
+bun run test:node     # the same suite with the HTTP fixtures running on Node
+bun run build         # ESM and TypeScript declarations into dist/
+bun run smoke         # install the packed package and render with Bun and Node
+bun run runtime       # regenerate the browser runtime and vendored idiomorph
 ```
 
-The browser tests need a browser: `bunx playwright install chromium`, or an
-installed Google Chrome, which they fall back to. They cover what unit tests
-cannot: which elements a patch morphs, element identity across list
-operations, focus and typed input, form reset, islands and hooks. CI runs
-all of it on every push, with the servers on Bun and on Node.
+Browser tests use Playwright's Chromium (`bunx playwright install chromium`)
+or an installed Google Chrome. They check DOM updates, element identity,
+focus, form input, islands and error handling. CI runs the suites with both
+Bun and Node.
 
-The browser runtime is written readably in `src/internal/browser.ts` and
-inlined from `src/internal/runtime.ts`, a generated, minified copy; a test
-fails when the copy is stale.
+The browser runtime lives in `src/internal/browser.ts`. After editing it,
+run `bun run runtime` to update the committed, minified copy in
+`src/internal/runtime.ts`; a test checks that the generated copy is current.
 
 ## Status
 
-MVP. Working: server render, live sessions with slot-level patches and
-memoized components, local and shared state, nested keyed components with
-their own state, forms, lists, many event types, cross-session updates,
-islands and element hooks, origin checks. Not yet: state recovery on
-reconnect, navigation, user-level authorization. See NOTES.md.
+Experimental MVP, built on Effect v4. The core works on Bun, Node and
+Cloudflare: server rendering, live WebSocket sessions, local and shared
+state, forms, keyed lists, and client-side islands. Updates use incremental
+patches and reuse unchanged components and DOM elements.
+
+The main limitations are:
+
+- **No session recovery.** Reconnecting creates a fresh session and resets
+  component-local state. Shared state survives while its owning service
+  stays alive; the examples do not persist it to storage.
+- **No built-in navigation or user authentication.** Applications provide
+  their own routing and access control. WebSocket origin checks are included.
+- **Session limits are still to come.** There are no built-in handler
+  timeouts, session caps or application-level backpressure controls.
+- **No Cloudflare WebSocket hibernation.** Live sessions stay in memory and
+  keep their Durable Object awake while connected.
+
+Planned work and unresolved design choices are tracked in [NOTES.md](./NOTES.md).
