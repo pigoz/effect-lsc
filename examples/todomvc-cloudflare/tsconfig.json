@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": [
+    "src"
+  ],
+  "compilerOptions": {
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "@cloudflare/workers-types"
+    ],
+    "jsxImportSource": "effect-lsc",
+    "paths": {
+      "effect-lsc": [
+        "../../src/index.ts"
+      ],
+      "effect-lsc/*": [
+        "../../src/*.ts"
+      ]
+    }
+  },
+  "exclude": [
+    "node_modules"
+  ]
+}

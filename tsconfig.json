@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "include": ["src", "examples", "test", "scripts", "vite.config.ts", "vitest.config.ts", "vitest.browser.config.ts"],
-  "exclude": ["examples/cloudflare", "node_modules", "dist"],
+  "exclude": ["examples/shared-counter-cloudflare", "examples/todomvc-cloudflare", "node_modules", "dist"],
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",

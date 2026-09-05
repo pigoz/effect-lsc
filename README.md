@@ -56,11 +56,12 @@ bun examples/counter/index.tsx          # per-tab state
 bun examples/shared-counter/index.tsx   # one counter shared by every tab
 bun examples/todomvc/index.tsx          # shared list, open it in two tabs
 bun examples/react-island/index.tsx     # a React chart inside a server-driven page
-bun run cloudflare                      # the shared counter in a Durable Object, under wrangler dev
+bun run shared-counter-cloudflare       # shared counter in a Durable Object
+bun run todomvc-cloudflare              # shared TodoMVC in a Durable Object
 ```
 
-Every example listens on port 3000. They are written for Bun 1.4.1 or
-later; the Cloudflare one runs under `wrangler dev`.
+The Bun examples listen on port 3000 and require Bun 1.4.1 or later.
+The Cloudflare examples run under `wrangler dev` (port 8787 by default).
 
 `View.State` is local to a session (a browser tab). To share state across
 tabs, put a `View.SharedState` in a service and `View.watch` it, as in
@@ -232,8 +233,10 @@ export default {
 }
 ```
 
-See `examples/cloudflare` (with its `wrangler.toml`). Sessions keep their
-state in memory, so this uses the classic `accept()` API rather than
+See `examples/shared-counter-cloudflare` and `examples/todomvc-cloudflare`.
+Each contains its own application code and Wrangler configuration. The todo
+list is shared within one object and kept in memory, not persisted to storage.
+Sessions keep their state in memory, so this uses the classic `accept()` API rather than
 WebSocket hibernation; the object stays alive while sockets are open.
 
 ### `effect-lsc/island`

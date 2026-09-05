@@ -1,6 +1,6 @@
 // A shared counter on Cloudflare: one Durable Object is the room, and
 // every tab routed to it shares the same SharedState, because the services
-// are built once per object. Run locally with `bun run cloudflare`.
+// are built once per object. Run locally with `bun run shared-counter-cloudflare`.
 import { DurableObject } from "cloudflare:workers"
 import { Context, Effect, Layer } from "effect"
 import { Cloudflare } from "effect-lsc/cloudflare"

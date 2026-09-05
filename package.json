@@ -61,7 +61,7 @@
     "dist/**/*.d.ts.map"
   ],
   "scripts": {
-    "check": "tsc -p tsconfig.json && tsc -p tsconfig.build.json --outDir .check && rm -rf .check && tsc -p examples/cloudflare/tsconfig.json --noEmit",
+    "check": "tsc -p tsconfig.json && tsc -p tsconfig.build.json --outDir .check && rm -rf .check && tsc -p examples/shared-counter-cloudflare/tsconfig.json --noEmit && tsc -p examples/todomvc-cloudflare/tsconfig.json --noEmit",
     "runtime": "bun scripts/build-runtime.ts && bun scripts/vendor-idiomorph.ts",
     "build": "rm -rf dist && vite build && tsc -p tsconfig.build.json",
     "test": "vitest run",
@@ -70,7 +70,8 @@
     "shared-counter": "bun examples/shared-counter/index.tsx",
     "todomvc": "bun examples/todomvc/index.tsx",
     "react-island": "bun examples/react-island/index.tsx",
-    "cloudflare": "wrangler dev --config examples/cloudflare/wrangler.toml",
+    "shared-counter-cloudflare": "wrangler dev --config examples/shared-counter-cloudflare/wrangler.toml",
+    "todomvc-cloudflare": "wrangler dev --config examples/todomvc-cloudflare/wrangler.toml",
     "prepublishOnly": "bun run check && bun run test && bun run build",
     "test:node": "LSC_RUNTIME=node vitest run --config vitest.browser.config.ts",
     "smoke": "bun scripts/smoke-package.ts"

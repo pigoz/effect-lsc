@@ -49,11 +49,11 @@ export const startServer = async (file: string): Promise<{ url: string; stop: ()
 }
 
 /** Starts the Cloudflare example under `wrangler dev` (local workerd) on a free port. */
-export const startWrangler = async (): Promise<{ url: string; stop: () => Promise<void> }> => {
+export const startWrangler = async (example: "shared-counter-cloudflare" | "todomvc-cloudflare" = "shared-counter-cloudflare"): Promise<{ url: string; stop: () => Promise<void> }> => {
   const port = await freePort()
   const child: ChildProcess = spawn(
     "node",
-    ["node_modules/wrangler/bin/wrangler.js", "dev", "--config", "examples/cloudflare/wrangler.toml", "--port", String(port), "--ip", "127.0.0.1"],
+    ["node_modules/wrangler/bin/wrangler.js", "dev", "--config", `examples/${example}/wrangler.toml`, "--port", String(port), "--ip", "127.0.0.1"],
     { cwd: root, env: { ...process.env, CI: "1", WRANGLER_SEND_METRICS: "false" }, stdio: ["ignore", "pipe", "pipe"] }
   )
   let log = ""
