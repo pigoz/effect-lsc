@@ -138,8 +138,8 @@ const pageResponse = (component: ComponentFn<{}, any, any>, options: MountOption
  * - a failing render is reported the same way, then the session ends and
  *   the socket is closed with code 1011: the browser reconnects and mounts
  *   a fresh session (use `View.ErrorBoundary` to contain failures instead)
- * - a closed socket is a normal end; every fiber and instance of the
- *   session is interrupted and cleaned up with its scope
+ * - a closed socket is a normal end; the running handler and render are
+ *   interrupted, then every instance of the session is closed
  */
 export const session = <E = never, R = never>(
   component: Root<E, R>,
@@ -190,7 +190,7 @@ export const session = <E = never, R = never>(
     // The read loop owns the socket: on some platforms it completes the
     // handshake and only then accepts writes, so onOpen asks the render
     // loop for the first render. Runs until the socket closes; closing the
-    // scope stops the fibers above.
+    // scope stops the fibers above, then closes the instances.
     yield* socket.runString(
       (message) =>
         decodeClientMessage(message).pipe(

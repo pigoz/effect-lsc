@@ -91,4 +91,35 @@ describe("Server.session", () => {
       yield* Fiber.join(running)
       assert.deepStrictEqual(clicks, ["save", "next"])
     }).pipe(Effect.provide(AtomRegistry.layer)))
+
+  it.live("a closed socket interrupts a running handler before releasing what it uses", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const log: Array<string> = []
+      const App = View.Component(function*() {
+        const connection = yield* View.once(Effect.acquireRelease(
+          Effect.sync(() => ({ open: true })),
+          (connection) =>
+            Effect.sync(() => {
+              connection.open = false
+              log.push("released")
+            })
+        ))
+        const save = () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Effect.sync(() => log.push(`interrupted, open: ${connection.open}`)))
+          )
+        return <button onClick={save}>save</button>
+      })
+      const ws = new FakeWebSocket()
+      const socket = yield* Socket.fromWebSocket(Effect.succeed(ws as unknown as globalThis.WebSocket))
+      const running = yield* Effect.forkChild(Server.session(App, socket))
+      yield* until(() => ws.sent.length > 0)
+      ws.receive({ t: "event", type: "click", id: "r.0" })
+      yield* Deferred.await(started)
+      ws.close()
+      yield* Fiber.join(running)
+      assert.deepStrictEqual(log, ["interrupted, open: true", "released"])
+    }))
 })

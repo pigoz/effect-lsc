@@ -37,7 +37,11 @@ export interface Session {
 }
 
 export const makeSession = (connected: boolean = true): Effect.Effect<Session, never, Scope.Scope> => Effect.gen(function*() {
-  const scope = yield* Effect.scope
+  // Instances live in a child of the caller's scope, created before the
+  // caller forks its fibers (the render and event loops of a live
+  // session). A scope closes in reverse order, so those fibers are
+  // interrupted before any instance releases what they may still use.
+  const scope = yield* Scope.fork(yield* Effect.scope)
   const dirty = yield* Queue.sliding<void>(1)
   const instances = new Map<string, InstanceHandle>()
   yield* Scope.addFinalizer(

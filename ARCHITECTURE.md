@@ -647,11 +647,13 @@ the failing one, are closed and lose their state. The fallback has paths
 of its own, so a component in it, such as `fallback={() => <Retry />}`,
 does not replace `<Chart />`. It is closed when a retry succeeds.
 
-When a socket closes, its session scope closes too: running handlers,
-component tasks and subscriptions are interrupted and cleaned up. A
-reconnect always starts a new session. Shared services outside that session
-can retain state, but restarting their server process or Durable Object
-loses in-memory data.
+When a socket closes, its session scope closes too. The running handler
+and render are interrupted first. Then the instances close, and their
+tasks, subscriptions, `View.once` resources and `View.provide` layers are
+released, so a handler never resumes on a released resource. A reconnect
+always starts a new session. Shared services outside that session can
+retain state, but restarting their server process or Durable Object loses
+in-memory data.
 
 The browser exposes these signals for application UI and diagnostics:
 
