@@ -64,6 +64,16 @@ open.
 Derived values use ordinary computation inside a component, or derived
 Effect atoms; see [atoms](./ARCHITECTURE.md#atoms).
 
+### Typed errors and `View.use`
+
+- **`View.catch` and `View.catchCause`:** boundaries for every typed error
+  of a subtree, or for its whole cause. `View.catchTags`, `View.orDie` and
+  `View.ErrorBoundary` cover these cases for now.
+- **`yield*` on a component:** `const Row = yield* Member` could stand for
+  `yield* View.use(Member)`. Components would have to be iterable, and a
+  plain function returning an Effect is not, so `View.use` would remain for
+  those.
+
 ### Atoms
 
 The atom integration leaves these open:

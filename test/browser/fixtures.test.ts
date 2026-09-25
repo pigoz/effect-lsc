@@ -60,3 +60,71 @@ describe("todomvc fixture (the example components)", () => {
     assert.deepStrictEqual(await labels(), ["one", "two", "from other tab"])
   })
 })
+
+describe("atom-search fixture (the example components)", () => {
+  let h: Harness
+  beforeAll(async () => {
+    h = await open("test/browser/fixtures/atom-search.tsx")
+    await connected(h.page)
+  })
+  afterAll(async () => {
+    await h?.stop()
+  })
+
+  const items = (page = h.page) => page.evaluate(() => Array.from(document.querySelectorAll("li")).map((li) => li.textContent))
+
+  it("asks for two letters, then shows results", async () => {
+    await h.page.fill("input", "a")
+    await h.page.waitForFunction(() => document.querySelector("main p")?.textContent === "Type at least two letters.")
+    await h.page.fill("input", "an")
+    await h.page.waitForFunction(() => document.querySelectorAll("li").length === 3)
+    assert.deepStrictEqual(await items(), ["banana", "mango", "orange"])
+    assert.strictEqual(await h.page.textContent("#calls"), "Backend calls: 1")
+  })
+
+  it("shares results and saved searches with another tab: one backend call per query", async () => {
+    const other = await h.context.newPage()
+    await other.goto(h.url)
+    await connected(other)
+    await other.fill("input", "an")
+    await other.waitForFunction(() => document.querySelectorAll("li").length === 3)
+    assert.strictEqual(await other.textContent("#calls"), "Backend calls: 1")
+    await other.click("#save")
+    await h.page.waitForFunction(() => document.querySelector("#saved button")?.textContent === "an")
+    // the query itself stays local to each tab
+    await other.fill("input", "pe")
+    await other.waitForFunction(() => document.querySelectorAll("li").length === 2)
+    assert.deepStrictEqual(await items(), ["banana", "mango", "orange"])
+    await h.page.waitForFunction(() => document.querySelector("#calls")?.textContent === "Backend calls: 2")
+    await other.close()
+  })
+
+  it("saves only queries of two or more letters", async () => {
+    await h.page.fill("input", "x")
+    await h.page.click("#save")
+    await h.page.fill("input", "ap")
+    await h.page.click("#save")
+    const saved = () => h.page.evaluate(() => Array.from(document.querySelectorAll("#saved button")).map((b) => b.textContent))
+    await h.page.waitForFunction(() => Array.from(document.querySelectorAll("#saved button")).some((b) => b.textContent === "ap"))
+    assert.notInclude(await saved(), "x")
+    // let the search for "ap" finish, so that no render of it reaches the next test
+    await h.page.waitForFunction(() => document.querySelectorAll("li").length === 4)
+  })
+
+  it("renders a new query twice: counting the backend call writes no atom during a render", async () => {
+    const other = await h.context.newPage()
+    const renders: Array<string> = []
+    other.on("websocket", (ws) =>
+      ws.on("framereceived", ({ payload }) => {
+        if (String(payload).startsWith(`{"t":"render"`)) renders.push(String(payload))
+      }))
+    await other.goto(h.url)
+    await connected(other)
+    renders.length = 0
+    await other.fill("input", "ch")
+    await other.waitForFunction(() => document.querySelectorAll("li").length === 1)
+    // "Searching…", then the results with the new count
+    assert.strictEqual(renders.length, 2)
+    await other.close()
+  })
+})

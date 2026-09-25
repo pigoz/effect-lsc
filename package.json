@@ -70,6 +70,7 @@
     "shared-counter": "bun examples/shared-counter/index.tsx",
     "todomvc": "bun examples/todomvc/index.tsx",
     "react-island": "bun examples/react-island/index.tsx",
+    "atom-search": "bun examples/atom-search/index.tsx",
     "shared-counter-cloudflare": "wrangler dev --config examples/shared-counter-cloudflare/wrangler.toml",
     "todomvc-cloudflare": "wrangler dev --config examples/todomvc-cloudflare/wrangler.toml",
     "prepublishOnly": "bun run check && bun run test && bun run build",

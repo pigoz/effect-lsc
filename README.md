@@ -154,7 +154,8 @@ Handlers write through the registry taken in the body. A component that
 watches atoms needs `AtomRegistry`, so its parent brings it in with
 `View.use`. An async atom gives an `AsyncResult` to render, or
 `View.result` waits for its value. See [atoms](./ARCHITECTURE.md#atoms)
-for lifetimes and pitfalls.
+for lifetimes and pitfalls, and the [search example](./examples/atom-search/App.tsx)
+for search results shared by every tab.
 
 ## Running the examples
 
@@ -164,6 +165,7 @@ bun examples/counter/index.tsx          # per-tab state
 bun examples/shared-counter/index.tsx   # one counter shared by every tab
 bun examples/todomvc/index.tsx          # shared list, open it in two tabs
 bun examples/react-island/index.tsx     # a React chart inside a server-driven page
+bun examples/atom-search/index.tsx      # search as you type, results shared as atoms
 bun run shared-counter-cloudflare       # shared counter in a Durable Object
 bun run todomvc-cloudflare              # shared TodoMVC in a Durable Object
 ```

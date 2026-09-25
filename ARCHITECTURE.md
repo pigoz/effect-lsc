@@ -406,6 +406,11 @@ The atom's typed error becomes the component's, handled with
 waits with it, and so does the HTTP response. Use it for fast data, or
 for data the first page must contain.
 
+The [search example](./examples/atom-search/App.tsx) combines these: the
+query is `View.State`, local to each tab, and the results are a family of
+atoms with an idle TTL, so two tabs searching for the same text share one
+call to the backend.
+
 Handlers write through the registry taken in the body.
 `registry.set(atom, value)` and `registry.update(atom, f)` return nothing,
 so a handler calls them directly. `Atom.set` is an Effect that needs
