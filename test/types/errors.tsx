@@ -1,6 +1,7 @@
 // Type tests: handling typed render errors where a component is defined.
 // Checked by `bun run check`; every @ts-expect-error must hide a real error.
 import { Effect } from "effect"
+import { Server } from "effect-lsc/server"
 import { View } from "effect-lsc/view"
 import { Auth, check, Db, Denied, type Equals, type Fn, NotFound } from "./util.ts"
 
@@ -109,3 +110,7 @@ export const pipedExcess = Page.pipe(View.catchTags({ Nope: () => null }))
 // @ts-expect-error
 export const notEffect = Page.pipe(Effect.orDie)
 
+// --- the root sees what is left ----------------------------------------------
+// @ts-expect-error Denied is unhandled
+export const unhandled = Server.mount("/", () => Half({ admin: true }))
+export const handled = Server.mount("/", () => All({ admin: true }))

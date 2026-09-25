@@ -26,7 +26,7 @@ import { script } from "./runtime.ts"
 import { type ClientMessage, decodeClientMessage, encodeServerMessage } from "./protocol.ts"
 import { render, renderTree } from "./render.ts"
 import { dispatch, makeSession } from "./session.ts"
-import type { Services } from "./view.ts"
+import type { Errors, NoScope, Services } from "./view.ts"
 import type { Child, ComponentFn } from "./vnode.ts"
 import { jsx, raw } from "./vnode.ts"
 import { diffNode } from "./wire.ts"
@@ -76,11 +76,34 @@ const liveContent = (html: string): Child => [
 ]
 
 /**
+ * A component that can be served: no typed error left, in its body or in
+ * its subtree, and no `Scope` requirement. The intersection names what is
+ * wrong in the type error.
+ */
+export type Root<E, R> = ComponentFn<{}, E, R> & RootCheck<Errors<E, R>> & NoScope<Services<R>>
+type RootCheck<E> = [E] extends [never] ? unknown : { readonly "effect-lsc: unhandled errors": E }
+
+/**
+ * The types say no typed error reaches the root; one that does got past
+ * them, through a cast (`as any`) or a component from `View.use` rendered
+ * elsewhere. Say so in the log. A `SocketError` comes from sending the
+ * patch, not from the render, and gets no hint.
+ */
+const rootFailure = (message: string, cause: Cause.Cause<unknown>) =>
+  cause.reasons.some((reason) => Cause.isFailReason(reason) && !Socket.isSocketError(reason.error))
+    ? Effect.logError(
+      `${message} (a typed error reached the root although the types say it cannot: ` +
+        "look for a cast, or a component from View.use rendered elsewhere)",
+      cause
+    )
+    : Effect.logError(message, cause)
+
+/**
  * Renders `component` once, with fresh disconnected state, into a full
  * HTML document with the browser runtime inlined.
  */
-export const page = <E, R>(
-  component: ComponentFn<{}, E, R>,
+export const page = <E = never, R = never>(
+  component: Root<E, R>,
   options?: MountOptions
 ): Effect.Effect<string, unknown, Services<R>> =>
   Effect.scoped(
@@ -93,12 +116,12 @@ export const page = <E, R>(
     })
   ) as Effect.Effect<string, unknown, Services<R>>
 
-const pageResponse = (component: ComponentFn<{}, unknown, any>, options: MountOptions | undefined) =>
-  page(component, options).pipe(
+const pageResponse = (component: ComponentFn<{}, any, any>, options: MountOptions | undefined) =>
+  page(component as Root<never, any>, options).pipe(
     Effect.map((html) => HttpServerResponse.html(html)),
     Effect.catchCause((cause) =>
       Effect.as(
-        Effect.logError("effect-lsc: render failed", cause),
+        rootFailure("effect-lsc: render failed", cause),
         HttpServerResponse.text("Internal Server Error", { status: 500 })
       )
     )
@@ -117,8 +140,8 @@ const pageResponse = (component: ComponentFn<{}, unknown, any>, options: MountOp
  * - a closed socket is a normal end; every fiber and instance of the
  *   session is interrupted and cleaned up with its scope
  */
-export const session = <E, R>(
-  component: ComponentFn<{}, E, R>,
+export const session = <E = never, R = never>(
+  component: Root<E, R>,
   socket: Socket.Socket,
   options?: { readonly debug?: boolean | undefined }
 ): Effect.Effect<void, never, Services<R>> =>
@@ -140,7 +163,7 @@ export const session = <E, R>(
         return patch === undefined ? Effect.void : write(encodeServerMessage({ t: "render", p: patch }))
       }),
       Effect.catchCause((cause) =>
-        Effect.logError("effect-lsc: render failed, ending the session", cause).pipe(
+        rootFailure("effect-lsc: render failed, ending the session", cause).pipe(
           Effect.andThen(report("render")(cause)),
           Effect.andThen(Effect.ignore(write(new Socket.CloseEvent(1011, "render failed"))))
         )
@@ -209,7 +232,7 @@ const forbidden = (request: HttpServerRequest.HttpServerRequest) =>
  * const App = Server.mount("/", Counter, { title: "Counter" })
  *
  * HttpRouter.serve(App).pipe(
- *   Layer.provide(BunHttpServer.layer({ port: 3000 })),
+ *   Layer.provide(BunHttpServer.layer({ port: 3000, disablePreemptiveShutdown: true })),
  *   Layer.launch,
  *   BunRuntime.runMain
  * )
@@ -217,7 +240,7 @@ const forbidden = (request: HttpServerRequest.HttpServerRequest) =>
  */
 export const mount = <E = never, R = never>(
   path: HttpRouter.PathInput,
-  component: ComponentFn<{}, E, R>,
+  component: Root<E, R>,
   options?: MountOptions
 ): Layer.Layer<never, never, HttpRouter.HttpRouter | HttpRouter.Request.From<"Requires", Exclude<Services<R>, HttpRouter.Provided>>> => {
   const handler = Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>

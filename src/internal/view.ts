@@ -358,7 +358,7 @@ declare const SubtreeTypeId: unique symbol
  * they do. Only render boundaries (`View.catchTag` and friends) remove
  * its errors. The root reads it back: `View.render` fails with its errors
  * and needs its services, `Server.mount`, `Server.page`, `Server.session`
- * and `Cloudflare.app` need its services.
+ * and `Cloudflare.app` need its services and reject its errors.
  */
 export interface Subtree<out E, out R> {
   readonly [SubtreeTypeId]: { readonly E: () => E; readonly R: () => R }

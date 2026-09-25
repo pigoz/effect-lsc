@@ -122,7 +122,8 @@ const Member = View.Component(function*(props: { readonly id: string }) {
 }).pipe(View.catchTag("UserNotFound", () => <li>Unknown user</li>))
 ```
 
-The boundary also covers the components `Member` uses. See
+The boundary also covers the components `Member` uses, and `Server.mount`
+rejects a tree with a typed error left unhandled. See
 [services and typed errors](./ARCHITECTURE.md#services-and-typed-errors-across-components)
 and [typed errors](./ARCHITECTURE.md#typed-errors).
 

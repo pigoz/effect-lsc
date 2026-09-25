@@ -29,7 +29,7 @@ const Page = View.Component(function*() {
       : Effect.void
   )
   yield* Effect.flatMap(View.Instance, (i) => i.slot(Effect.addFinalizer(() => say("page instance closed"))))
-  if (explode.value) return yield* Effect.fail(new Error("render exploded"))
+  if (explode.value) return yield* Effect.die(new Error("render exploded"))
   return (
     <main>
       <output id="count">{count.value}</output>

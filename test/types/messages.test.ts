@@ -17,15 +17,27 @@ const at = (line: number) => output.split("\n").filter((l) => l.startsWith(`test
 
 describe("type error messages", () => {
   it("a component with services used as a tag says to bring it in with View.use", () => {
-    assert.isTrue(at(19))
+    assert.isTrue(at(21))
     assert.include(output, "effect-lsc: bring it in with View.use")
   })
   it("a component requiring Scope says to acquire resources with View.once", () => {
-    assert.isTrue(at(20))
+    assert.isTrue(at(22))
     assert.include(output, "effect-lsc: this component requires Scope; acquire resources with View.once")
   })
   it("a recovery handler using View.State says to return a component instead", () => {
-    assert.isTrue(at(21))
+    assert.isTrue(at(23))
     assert.include(output, "effect-lsc: recovery runs outside the instance; return a component that uses View.State instead")
+  })
+  it("a root with a typed error left names the unhandled errors", () => {
+    assert.isTrue(at(24))
+    assert.include(output, `"effect-lsc: unhandled errors": NotFound`)
+  })
+  it("a Cloudflare layer that lacks a service names the missing services", () => {
+    assert.isTrue(at(25))
+    assert.include(output, `"effect-lsc: missing services": Db`)
+  })
+  it("a root requiring Scope says to acquire resources with View.once", () => {
+    assert.isTrue(at(26))
+    assert.include(output, "effect-lsc: this component requires Scope; acquire resources with View.once")
   })
 })

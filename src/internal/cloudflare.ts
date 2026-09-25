@@ -30,12 +30,12 @@
  * sockets are open: this uses the classic `accept()` API, not WebSocket
  * hibernation. Hibernation needs serializable session state; see NOTES.
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Socket from "effect/unstable/socket/Socket"
-import { type MountOptions, originAllowed, page, session } from "./server.ts"
-import type { ComponentFn } from "./vnode.ts"
+import { type MountOptions, originAllowed, page, type Root, session } from "./server.ts"
 import type { Services } from "./view.ts"
 
 /**
@@ -53,6 +53,10 @@ export interface AppOptions<R> extends MountOptions {
   readonly layer: Layer.Layer<R, unknown, never>
 }
 
+/** Names the services the layer lacks in the type error. */
+type Missing<Needed, Provided> = [Exclude<Needed, Provided>] extends [never] ? unknown
+  : { readonly "effect-lsc: missing services": Exclude<Needed, Provided> }
+
 export interface App {
   readonly fetch: (request: Request) => Promise<Response>
   /** Releases the services. Call it when the object is destroyed, if ever. */
@@ -62,15 +66,38 @@ export interface App {
 const isUpgrade = (request: Request) => request.headers.get("upgrade")?.toLowerCase() === "websocket"
 
 /**
- * A `fetch` handler serving `component` from a Durable Object.
+ * A `fetch` handler serving `component` from a Durable Object. The layer
+ * must provide every service the component's tree needs: a missing one is
+ * named in the type error.
  */
-export const app = <E, R>(component: ComponentFn<{}, E, R>, options: AppOptions<Services<R>>): App => {
-  const runtime = ManagedRuntime.make(options.layer)
+export const app = <E = never, R = never, L extends Layer.Layer<never, unknown, never> = Layer.Layer<never>>(
+  component: Root<E, R>,
+  // The layer is inferred whole and checked in place: a check beside it
+  // would stop TypeScript from inferring a layer written inline.
+  options: MountOptions & { readonly layer: L & Missing<Services<R>, Layer.Success<L>> }
+): App => {
+  type ROut = Layer.Success<L>
+  const runtime = ManagedRuntime.make(options.layer as unknown as Layer.Layer<ROut, unknown>)
   const fetch = async (request: Request): Promise<Response> => {
+    // Built on the first request, and a failed build is kept. Report it as
+    // the layer's, not as a render failure.
+    const services = await Effect.runPromiseExit(runtime.contextEffect)
+    if (services._tag === "Failure") {
+      console.error("effect-lsc: services failed to build", services.cause)
+      return new Response("Internal Server Error", { status: 500 })
+    }
     if (!isUpgrade(request)) {
-      const rendered = await runtime.runPromiseExit(page(component, options))
+      const rendered = await runtime.runPromiseExit(page(component, options) as Effect.Effect<string, unknown, ROut>)
       if (rendered._tag === "Failure") {
-        console.error("effect-lsc: render failed", rendered.cause)
+        // The services are built: a typed failure here got past the types.
+        const typed = rendered.cause.reasons.some((reason) => Cause.isFailReason(reason) && !Socket.isSocketError(reason.error))
+        console.error(
+          typed
+            ? "effect-lsc: render failed (a typed error reached the root although the types say it cannot: " +
+              "look for a cast, or a component from View.use rendered elsewhere)"
+            : "effect-lsc: render failed",
+          rendered.cause
+        )
         return new Response("Internal Server Error", { status: 500 })
       }
       return new Response(rendered.value, { headers: { "content-type": "text/html; charset=utf-8" } })
@@ -86,7 +113,7 @@ export const app = <E, R>(component: ComponentFn<{}, E, R>, options: AppOptions<
     const server = pair[1]
     server.accept()
     const socket = await runtime.runPromise(Socket.fromWebSocket(Effect.succeed(server)))
-    runtime.runFork(session(component, socket, options))
+    runtime.runFork(session(component, socket, options) as Effect.Effect<void, never, ROut>)
     return new Response(null, { status: 101, webSocket: client } as ResponseInit)
   }
   return { fetch, dispose: () => runtime.dispose() }

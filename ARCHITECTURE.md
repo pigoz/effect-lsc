@@ -156,7 +156,7 @@ carries what the child itself used.
 | Where the tree is rendered | What happens to `Subtree` |
 | --- | --- |
 | `View.render(Component, props)` | The Effect fails with every typed error in the tree and needs every service. |
-| `Server.mount`, `Server.page`, `Server.session`, `Cloudflare.app` | They need every service in the tree, so a missing one is a type error, not a failure when the child renders. |
+| `Server.mount`, `Server.page`, `Server.session`, `Cloudflare.app` | They need every service in the tree, so a missing one is a type error, not a failure when the child renders. A typed error left in the tree is a type error too; see [what a root accepts](#what-a-root-accepts). |
 
 `Subtree` lives in the requirements channel so that no Effect combinator
 can remove it. `Effect.catchTag(Members(props), "UserNotFound", ...)` does
@@ -350,8 +350,10 @@ application layer. Forward the Durable Object's `fetch` to this adapter.
 
 The layer is built once per Durable Object. Tabs routed to the same object
 therefore share its services; routing to different objects separates them.
-The Worker must send both HTTP requests and WebSocket upgrades to the
-intended object. Complete configurations are in
+It is built on the first request. A layer that fails to build is logged as
+such, and every request to the object gets HTTP 500. The Worker must send
+both HTTP requests and WebSocket upgrades to the intended object. Complete
+configurations are in
 [shared-counter-cloudflare](./examples/shared-counter-cloudflare/README.md)
 and [todomvc-cloudflare](./examples/todomvc-cloudflare/README.md).
 
@@ -359,6 +361,60 @@ The adapter uses `WebSocketPair` and the classic `accept()` API. Sessions
 live in memory and keep the object awake while sockets are open; WebSocket
 hibernation and automatic state persistence are not implemented.
 `dispose()` releases the application's managed Effect runtime.
+
+### What a root accepts
+
+`Server.mount`, `Server.page`, `Server.session` and `Cloudflare.app` take a
+`Server.Root<E, R>`: a component without props whose whole tree, the body
+and its `Subtree`, has no typed error left and does not require `Scope`.
+Otherwise the call is a type error that names the problem:
+
+| Mistake | The type error contains |
+| --- | --- |
+| A typed error left in the tree | `"effect-lsc: unhandled errors": UserNotFound` |
+| A component that requires `Scope` | `"effect-lsc: this component requires Scope; acquire resources with View.once"` |
+| A `Cloudflare.app` layer that lacks a service | `"effect-lsc: missing services": Users` |
+
+Handle typed errors with `View.catchTag`, `View.catchTags` or `View.orDie`;
+see [typed errors](#typed-errors). A typed error that still reaches the
+root at runtime got past the types, through a cast such as `as any` or a
+component from `View.use` rendered elsewhere; see
+[services and typed errors](#services-and-typed-errors-across-components).
+The server logs the render failure with a hint.
+
+The root requires every service the tree uses. `Server.page` and
+`Server.session` return Effects that require them. `Server.mount` returns a
+Layer that requires them from the router, like any route, so a service that
+no layer provides is reported where the application is launched, at the
+`Layer.launch` step, not at `mount`. `Cloudflare.app` checks its `layer`
+against the tree instead and names the services it lacks. That layer may
+not have requirements of its own.
+
+A service that depends on the request, such as the current user, comes
+from an `HttpRouter` middleware. The middleware runs for the HTTP render
+and for the WebSocket upgrade, so the live session keeps the value
+resolved when it connected:
+
+```ts
+class CurrentUser extends Context.Service<CurrentUser, {
+  readonly name: string
+}>()("app/CurrentUser") {}
+
+const Authentication = HttpRouter.middleware<{ provides: CurrentUser }>()(
+  Effect.succeed((handler) =>
+    Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+      Effect.provideService(handler, CurrentUser, {
+        name: request.cookies["user"] ?? "guest"
+      })
+    )
+  )
+)
+
+// Routes no longer requires CurrentUser: the middleware provides it to App's tree.
+const Routes = Server.mount("/", App).pipe(Layer.provide(Authentication.layer))
+```
+
+The cookie stands in for real authentication.
 
 ## Errors and reconnects
 
@@ -446,7 +502,8 @@ is a function, not an Effect.
 The result no longer fails with the handled errors. Its other errors and
 its services move to its `Subtree`, so the parent brings it in with
 `View.use`; with neither left, it is a closed component. These helpers are
-the only way to remove errors from a `Subtree`.
+the only way to remove errors from a `Subtree`, and a root accepts a tree
+only when none is left; see [what a root accepts](#what-a-root-accepts).
 
 Like `Effect.catchTag`, a boundary handles the first typed failure of the
 cause. Other failures, defects included, pass to the next boundary up. A
