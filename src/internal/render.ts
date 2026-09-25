@@ -52,6 +52,11 @@ const forgetHandlers = (session: Session, owner: Owner): void => {
  * it registered, and the memoized nodes of the instances it rendered, which
  * are no longer on the page. The instances and their state stay, for the
  * next attempt.
+ *
+ * Without a node, those instances render again on the next attempt anyway,
+ * so they are marked clean: the failed ones were left dirty, and a change
+ * in one of them must still reach the boundary above, which is clean after
+ * rendering its fallback.
  */
 const discardAttempt = (session: Session, owner: InstanceHandle): void => {
   forgetHandlers(session, owner)
@@ -59,6 +64,7 @@ const discardAttempt = (session: Session, owner: InstanceHandle): void => {
     const child = session.instances.get(path)
     if (child === undefined) continue
     child.node = undefined
+    child.dirty = false
     discardAttempt(session, child)
   }
 }

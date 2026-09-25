@@ -114,6 +114,29 @@ describe("failure semantics", () => {
       assert.deepStrictEqual(fired, ["button", "ok"])
     }))
 
+  it.effect("a boundary retries when the component that failed changes its own state", () =>
+    Effect.gen(function*() {
+      let bump: Effect.Effect<void> = Effect.void
+      const Bad = View.Component(function*() {
+        const n = yield* View.State(0)
+        bump = n.update((x) => x + 1)
+        if (n.value === 1) return yield* Effect.die("boom")
+        return <b>{n.value}</b>
+      })
+      const App = () => (
+        <View.ErrorBoundary fallback={() => <p>fallback</p>}>
+          <Bad />
+        </View.ErrorBoundary>
+      )
+      const session = yield* makeSession()
+      assert.strictEqual(yield* render(session, <App />), "<b>0</b>")
+      // the state changes outside any handler, as with a ticker started by View.once
+      yield* bump
+      assert.strictEqual(yield* render(session, <App />), "<p>fallback</p>")
+      yield* bump
+      assert.strictEqual(yield* render(session, <App />), "<b>2</b>")
+    }))
+
   it.effect("a boundary can recover with an Effect, and a failing recovery reaches the boundary above", () =>
     Effect.gen(function*() {
       const Bad = View.Component(function*(p: { readonly explode: boolean }) {
