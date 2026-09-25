@@ -9,9 +9,17 @@ import type * as VNode from "./internal/vnode.ts"
 import { Fragment as Fragment_, jsx as jsx_ } from "./internal/vnode.ts"
 import type * as Events from "./internal/events.ts"
 
-export const jsx = (type: unknown, props: VNode.Props, key?: unknown): VNode.VNode => jsx_(type, props, key, false)
+/**
+ * What the factories accept: the same tags as `JSX.ElementType`, and
+ * fragments. A generic tag also gets the `TagCheck` that JSX applies.
+ */
+export type ElementType = string | VNode.Fragment | VNode.ElementComponent
+
+export const jsx = <C extends ElementType>(type: C & VNode.TagCheck<C>, props: VNode.Props, key?: unknown): VNode.VNode =>
+  jsx_(type, props, key, false)
 /** Emitted for a literal list of sibling children: their shape is static. */
-export const jsxs = (type: unknown, props: VNode.Props, key?: unknown): VNode.VNode => jsx_(type, props, key, true)
+export const jsxs = <C extends ElementType>(type: C & VNode.TagCheck<C>, props: VNode.Props, key?: unknown): VNode.VNode =>
+  jsx_(type, props, key, true)
 export const Fragment: VNode.Fragment = Fragment_
 
 type Booleanish = boolean | "true" | "false"
@@ -178,7 +186,9 @@ export interface ProgressAttributes extends HTMLAttributes {
 
 export declare namespace JSX {
   export type Element = VNode.VNode
-  export type ElementType = string | VNode.ComponentFn<any, any, any>
+  export type ElementType = string | VNode.ElementComponent
+  /** The props of tag `C`; a generic tag with errors or services also gets its `TagCheck`. */
+  export type LibraryManagedAttributes<C, P> = P & VNode.TagCheck<C>
   export interface ElementChildrenAttribute {
     readonly children: {}
   }

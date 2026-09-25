@@ -4,11 +4,12 @@
  */
 import type * as VNode from "./internal/vnode.ts"
 import { jsx as jsx_ } from "./internal/vnode.ts"
+import type { ElementType } from "./jsx-runtime.ts"
 
 export * from "./jsx-runtime.ts"
 
-export const jsxDEV = (
-  type: unknown,
+export const jsxDEV = <C extends ElementType>(
+  type: C & VNode.TagCheck<C>,
   props: VNode.Props,
   key?: unknown,
   isStaticChildren?: unknown,

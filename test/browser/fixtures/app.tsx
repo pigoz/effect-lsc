@@ -103,14 +103,17 @@ const IslandSection = View.Component(function*() {
   )
 })
 
-const Page = () => (
-  <main>
-    <Counter />
-    <ListSection />
-    <FormSection />
-    <IslandSection />
-  </main>
-)
+const Page = View.Component(function*() {
+  const SharedCounter = yield* View.use(Counter)
+  return (
+    <main>
+      <SharedCounter />
+      <ListSection />
+      <FormSection />
+      <IslandSection />
+    </main>
+  )
+})
 
 const layout = (content: View.Child) => (
   <html lang="en">

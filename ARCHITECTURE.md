@@ -32,9 +32,19 @@ such as `class` and `for`. `class` accepts an array with falsy entries, and
 `style` accepts an object. Use `key` on dynamic list items to preserve their
 component identity when items are inserted, removed or moved.
 
+JSX accepts closed components: plain functions, and components whose Effect
+has no typed error and needs no service besides `View.Instance`, which the
+renderer provides. A component with services or typed errors is brought
+into its parent with `View.use`; see
+[services and typed errors](#services-and-typed-errors-across-components).
+`View.Closed<P>` is the type of a closed component, for props that receive
+one.
+
 `View.Component` does not keep the type parameters of a generic body. Write
 a generic component as a plain function; it can return `Effect.gen(...)` to
-use `View.State`.
+use `View.State`. JSX rejects a generic tag whose typed errors or services
+come from a type parameter; see
+[services and typed errors](#services-and-typed-errors-across-components).
 
 A component runs on its first render, when its state or watched sources
 change, when a descendant changes, or when its props differ. Otherwise the
@@ -110,14 +120,117 @@ const NewTodo = View.Component(function*() {
 
 Here `Todos` is the application service from the TodoMVC examples. Provide
 its layer to the server with `Layer.provide(Todos.layer)`, or to
-`Cloudflare.app` through its `layer` option. Requirements acquired by the
-root component appear in its type. JSX does not carry child component
-requirements into the parent's type, so services used only by children
-must also be provided; a missing service fails when the child renders.
+`Cloudflare.app` through its `layer` option. `NewTodo` needs `Todos`, so its
+parent brings it in with `View.use`, and the root's type requires `Todos`.
 
 Events run one at a time, in arrival order, within each session. A slow
 handler delays later events from that browser. Other sessions can continue
 handling their own events.
+
+### Services and typed errors across components
+
+A component's Effect covers its body only. Its children render later, after
+the body has returned, so their services and errors are not part of that
+Effect. `View.use` records them in the parent's type instead:
+
+```tsx
+const Member = View.Component(function*(props: { readonly id: string }) {
+  const users = yield* Users
+  const user = yield* users.find(props.id) // fails with UserNotFound
+  return <li>{user.name}</li>
+})
+
+const Members = View.Component(function*(props: { readonly ids: ReadonlyArray<string> }) {
+  const Row = yield* View.use(Member)
+  return <ul>{props.ids.map((id) => <Row key={id} id={id} />)}</ul>
+})
+// (props) => Effect<VNode, never, View.Subtree<UserNotFound, Users>>
+```
+
+`use` returns the child as a closed component, usable as a tag. At runtime
+it returns the same function: the child keeps its instance and state, and
+`use` takes no slot, so it may be called conditionally. Every `use` in a
+`View.Component` body merges into one `View.Subtree<E, R>`, which also
+carries what the child itself used.
+
+| Where the tree is rendered | What happens to `Subtree` |
+| --- | --- |
+| `View.render(Component, props)` | The Effect fails with every typed error in the tree and needs every service. |
+| `Server.mount`, `Server.page`, `Server.session`, `Cloudflare.app` | They need every service in the tree, so a missing one is a type error, not a failure when the child renders. |
+
+`Subtree` lives in the requirements channel so that no Effect combinator
+can remove it. `Effect.catchTag(Members(props), "UserNotFound", ...)` does
+not compile, and `Effect.provideService(Members(props), Users, users)`
+still requires `Subtree<UserNotFound, Users>`: neither would reach the
+rows, which render after the body. `View.use` itself requires the
+`Subtree` it records, so `Effect.runSync(View.use(Member))` does not
+compile either.
+
+Handle a typed error in the body that raises it. At runtime, an unhandled
+one fails the render like a defect: `View.ErrorBoundary` catches it, but
+the types keep it in the parent's `Subtree`.
+
+`use` and `View.render` reject a component that requires `Scope`: during a
+render it would be the session's scope, and every render would add a
+finalizer to it. Acquire resources with `View.once`.
+
+`View.Errors<E, R>` and `View.Services<R>` compute the typed errors and
+the services of a component's whole tree, `Subtree` included, from the
+`E` and `R` of its Effect, and `View.NoScope<R>` rejects `Scope`. `use`
+and `View.render` are typed with them, as a wrapper around them can be.
+
+A recursive component refers to its own type before it is inferred.
+Annotate it with `View.Component<Args, E, R>`, the type of a component
+whose tree fails with at most `E` and needs at most `R`:
+
+```tsx
+const Tree: View.Component<
+  [props: { readonly node: TreeNode }],
+  LabelNotFound,
+  Labels
+> = View.Component(function*(props) {
+  const labels = yield* Labels
+  const Self = yield* View.use(Tree)
+  const label = yield* labels.find(props.node.id) // fails with LabelNotFound
+  const children = props.node.children.map((c) => <Self key={c.id} node={c} />)
+  return <li>{label}<ul>{children}</ul></li>
+})
+```
+
+`use` does not keep the type parameters of a generic component. Pass an
+instantiation expression: `View.use(Rows<number>)`.
+
+JSX checks a generic tag with its type parameters erased, since the check
+cannot see the instantiation. A tag whose typed errors or services come
+from a type parameter is therefore rejected, even where they would be
+`never`. Bring such a component in with `use` and an instantiation, which
+records what it fails with and needs:
+
+```tsx
+const Await = <A, E, R>(props: {
+  readonly effect: Effect.Effect<A, E, R>
+  readonly children: (value: A) => View.Child
+}) => Effect.map(props.effect, props.children)
+
+const Profile = View.Component(function*(props: { readonly id: string }) {
+  const users = yield* Users
+  const AwaitUser = yield* View.use(Await<User, UserNotFound, never>)
+  return <AwaitUser effect={users.find(props.id)}>{(u) => <h1>{u.name}</h1>}</AwaitUser>
+})
+```
+
+`<Await effect={Effect.succeed(1)}>` is rejected too: use
+`View.use(Await<number, never, never>)`. A generic component that only uses
+`View.State` and the other `View` helpers is accepted as a tag.
+
+The accounting follows `use`. A component obtained with `use` and then
+stored elsewhere, in state or a service, or rendered by another root,
+escapes the accounting of the parent that used it. `as any` casts also get
+through, and so does a service key made for the `View.Subtree` type
+itself: `Effect.provideService` with it removes the `Subtree`, which
+amounts to a cast. An overloaded component is checked against one of its
+overloads only, so give a component with services or typed errors a
+single signature. Handler errors and defects are not typed.
 
 ### Component lifetime and rendering helpers
 
@@ -127,6 +240,7 @@ handling their own events.
 | `View.connected` | Read whether this is a live WebSocket session (`true`) or the initial HTTP render (`false`). |
 | `View.ErrorBoundary` | Render a fallback when a child fails to render; see [errors and reconnects](#errors-and-reconnects). |
 | `View.render(jsx)` | Render to an HTML string in a temporary, disconnected session. Useful in tests; it does not start a live connection. |
+| `View.render(Component, props)` | Render a component the same way. The Effect fails with the tree's typed errors and needs its services. |
 | `View.raw(html)` | Emit trusted HTML verbatim, without escaping. |
 | `View.Fragment` / `<>…</>` | Group children without an extra HTML element. |
 | `View.Instance` | Access the renderer-provided instance service and its scope. Usually the helpers above are sufficient. |

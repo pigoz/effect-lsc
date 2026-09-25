@@ -12,7 +12,7 @@ describe("failure semantics", () => {
     Effect.gen(function*() {
       const Child = View.Component(function*(p: { readonly explode: boolean }) {
         const n = yield* View.State(0)
-        if (p.explode) return yield* Effect.fail("boom")
+        if (p.explode) return yield* Effect.die("boom")
         return <button onClick={() => n.update((x) => x + 1)}>{n.value}</button>
       })
       const App = (p: { readonly explode: boolean }) => <main><Child explode={p.explode} /></main>
@@ -45,7 +45,7 @@ describe("failure semantics", () => {
     Effect.gen(function*() {
       const Risky = View.Component(function*(p: { readonly threshold: number }) {
         const n = yield* View.State(0)
-        if (n.value >= p.threshold) return yield* Effect.fail(`too high: ${n.value}`)
+        if (n.value >= p.threshold) return yield* Effect.die(`too high: ${n.value}`)
         return <button onClick={() => n.update((x) => x + 1)}>{n.value}</button>
       })
       const Sibling = View.Component(function*() {

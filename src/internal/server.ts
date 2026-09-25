@@ -23,10 +23,10 @@ import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import * as Socket from "effect/unstable/socket/Socket"
 import { script } from "./runtime.ts"
-import type { Instance } from "./instance.ts"
 import { type ClientMessage, decodeClientMessage, encodeServerMessage } from "./protocol.ts"
 import { render, renderTree } from "./render.ts"
 import { dispatch, makeSession } from "./session.ts"
+import type { Services } from "./view.ts"
 import type { Child, ComponentFn } from "./vnode.ts"
 import { jsx, raw } from "./vnode.ts"
 import { diffNode } from "./wire.ts"
@@ -82,7 +82,7 @@ const liveContent = (html: string): Child => [
 export const page = <E, R>(
   component: ComponentFn<{}, E, R>,
   options?: MountOptions
-): Effect.Effect<string, unknown, Exclude<R, Instance>> =>
+): Effect.Effect<string, unknown, Services<R>> =>
   Effect.scoped(
     Effect.gen(function*() {
       const session = yield* makeSession(false)
@@ -91,7 +91,7 @@ export const page = <E, R>(
       const document = yield* render(yield* makeSession(false), layout(liveContent(html)))
       return `<!doctype html>${document}`
     })
-  ) as Effect.Effect<string, unknown, Exclude<R, Instance>>
+  ) as Effect.Effect<string, unknown, Services<R>>
 
 const pageResponse = (component: ComponentFn<{}, unknown, any>, options: MountOptions | undefined) =>
   page(component, options).pipe(
@@ -121,7 +121,7 @@ export const session = <E, R>(
   component: ComponentFn<{}, E, R>,
   socket: Socket.Socket,
   options?: { readonly debug?: boolean | undefined }
-): Effect.Effect<void, never, Exclude<R, Instance>> =>
+): Effect.Effect<void, never, Services<R>> =>
   Effect.gen(function*() {
     const session = yield* makeSession(true)
     const write = yield* socket.writer
@@ -169,7 +169,7 @@ export const session = <E, R>(
     Effect.scoped,
     Effect.catchTag("SocketError", () => Effect.void),
     Effect.catchCause((cause) => Effect.logError("effect-lsc: live session failed", cause))
-  ) as Effect.Effect<void, never, Exclude<R, Instance>>
+  ) as Effect.Effect<void, never, Services<R>>
 
 const isUpgrade = (request: HttpServerRequest.HttpServerRequest) =>
   request.headers["upgrade"]?.toLowerCase() === "websocket"
@@ -219,7 +219,7 @@ export const mount = <E = never, R = never>(
   path: HttpRouter.PathInput,
   component: ComponentFn<{}, E, R>,
   options?: MountOptions
-): Layer.Layer<never, never, HttpRouter.HttpRouter | HttpRouter.Request.From<"Requires", Exclude<R, Instance | HttpRouter.Provided>>> => {
+): Layer.Layer<never, never, HttpRouter.HttpRouter | HttpRouter.Request.From<"Requires", Exclude<Services<R>, HttpRouter.Provided>>> => {
   const handler = Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
     !isUpgrade(request)
       ? pageResponse(component, options)
@@ -236,7 +236,7 @@ export const mount = <E = never, R = never>(
   ) as Effect.Effect<
     HttpServerResponse.HttpServerResponse,
     never,
-    Exclude<R, Instance> | HttpServerRequest.HttpServerRequest | Scope.Scope
+    Services<R> | HttpServerRequest.HttpServerRequest | Scope.Scope
   >
   return HttpRouter.use((router) => router.add("GET", path, handler))
 }

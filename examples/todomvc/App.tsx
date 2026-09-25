@@ -12,6 +12,11 @@ const filters: ReadonlyArray<{ readonly id: Filter; readonly label: string }> = 
 
 export const App = View.Component(function*() {
   const todos = yield* Todos
+  // Children that need services (Todos) are brought in with `use`: their
+  // requirements become App's, and Server.mount sees all of them.
+  const Header = yield* View.use(NewTodo)
+  const Item = yield* View.use(TodoItem)
+  const Filters = yield* View.use(Footer)
   // Shared state: re-renders this session whenever the list changes,
   // no matter which session (browser tab) changed it.
   const all = yield* View.watch(todos.all)
@@ -26,7 +31,7 @@ export const App = View.Component(function*() {
 
   return (
     <section class="todoapp">
-      <NewTodo />
+      <Header />
       {all.length > 0 && (
         <>
           <main class="main">
@@ -41,10 +46,10 @@ export const App = View.Component(function*() {
               <label for="toggle-all">Mark all as complete</label>
             </div>
             <ul class="todo-list">
-              {visible.map((todo) => <TodoItem key={todo.id} todo={todo} />)}
+              {visible.map((todo) => <Item key={todo.id} todo={todo} />)}
             </ul>
           </main>
-          <Footer remaining={remaining} completed={all.length - remaining} filter={filter} />
+          <Filters remaining={remaining} completed={all.length - remaining} filter={filter} />
         </>
       )}
     </section>

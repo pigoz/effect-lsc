@@ -2,6 +2,7 @@
  * `View`: the component model of effect-lsc.
  *
  * - `View.Component` turns a generator into a component
+ * - `View.use` brings a component with services or typed errors into a parent
  * - `View.State` creates component-local state that survives re-renders
  * - `View.SharedState` creates state shared by components and sessions
  * - `View.watch` makes a component re-render when a state changes
@@ -19,8 +20,8 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import { Instance } from "./instance.ts"
 import { render as render_ } from "./render.ts"
 import { makeSession } from "./session.ts"
-import type { Boundary, Child } from "./vnode.ts"
-import { BoundaryTypeId, Fragment as Fragment_, raw as raw_ } from "./vnode.ts"
+import type { Boundary, Child, ClosedComponent } from "./vnode.ts"
+import { BoundaryTypeId, Fragment as Fragment_, jsx, raw as raw_ } from "./vnode.ts"
 
 export type {
   EventBase,
@@ -33,6 +34,7 @@ export type {
   ViewEvent
 } from "./events.ts"
 export type { Child, ComponentFn, ComponentNode, Element, FragmentNode, Props, Raw, VNode } from "./vnode.ts"
+export type { ClosedComponent as Closed }
 export { Instance } from "./instance.ts"
 
 /**
@@ -80,6 +82,8 @@ type Signature<Args extends [props?: any], A> = [Args] extends [[]] ? () => A : 
 /**
  * Defines a component from a generator body. The body runs when the
  * component renders and may `yield*` any Effect, including `View.State`.
+ * The result is typed with the body's own errors and services, plus the
+ * `Subtree` of the components it brought in with `View.use`.
  *
  * ```tsx
  * const Counter = View.Component(function*() {
@@ -94,7 +98,38 @@ export const Component = <
   A extends Child
 >(
   body: (...args: Args) => Generator<Eff, A, never>
-): Signature<Args, Effect.Effect<A, Effect.Error<Eff>, Effect.Services<Eff>>> => Effect.fnUntraced(body) as any
+): Signature<
+  Args,
+  Effect.Effect<
+    A,
+    Effect.Error<Eff>,
+    // Subtree entries merged into one. Written inline: an alias would show up in hovers.
+    | Exclude<Effect.Services<Eff>, Subtree<any, any>>
+    | ([Extract<Effect.Services<Eff>, Subtree<any, any>>] extends [never] ? never
+      : Subtree<ErrorsIn<Effect.Services<Eff>>, ServicesIn<Effect.Services<Eff>>>)
+  >
+> => Effect.fnUntraced(body) as any
+
+/**
+ * The type of a component whose tree fails with at most `E` and needs at
+ * most `R`; `View.Component<Args>` alone is a closed component. Annotate a
+ * recursive component with it:
+ *
+ * ```tsx
+ * const Tree: View.Component<
+ *   [props: { readonly id: string }],
+ *   NotFound,
+ *   Db
+ * > = View.Component(function*(props) {
+ *   const Node = yield* View.use(Tree)
+ *   ...
+ * })
+ * ```
+ */
+export type Component<Args extends [props?: any], E = never, R = never> = Signature<
+  Args,
+  Effect.Effect<Child, E, Instance | R | Lift<E, R>>
+>
 
 // -----------------------------------------------------------------------------
 // Local state
@@ -289,9 +324,78 @@ export const once = <A>(effect: Effect.Effect<A, never, Scope.Scope>): Effect.Ef
  */
 export const connected: Effect.Effect<boolean, never, Instance> = Effect.map(Instance, (instance) => instance.connected)
 
+// -----------------------------------------------------------------------------
+// Services and typed errors across components
+// -----------------------------------------------------------------------------
+
+declare const SubtreeTypeId: unique symbol
+
 /**
- * Renders a tree to an HTML string with a throwaway, disconnected session.
- * Handlers are rendered as ids but nothing is listening for them.
+ * What a component's subtree can fail with (`E`) and needs (`R`), as
+ * recorded by `View.use`. It lives in the requirements channel on purpose:
+ * those errors and services belong to children that render after the
+ * parent's body has returned, so `Effect.catchTag` or `Effect.provide`
+ * around the parent cannot handle them, and the types must not pretend
+ * they do. The root reads it back: `View.render` fails with its errors and
+ * needs its services, `Server.mount`, `Server.page`, `Server.session` and
+ * `Cloudflare.app` need its services.
  */
-export const render = (child: Child): Effect.Effect<string, unknown> =>
-  Effect.scoped(Effect.flatMap(makeSession(false), (session) => render_(session, child)))
+export interface Subtree<out E, out R> {
+  readonly [SubtreeTypeId]: { readonly E: () => E; readonly R: () => R }
+}
+
+type ErrorsIn<R> = R extends Subtree<infer E, any> ? E : never
+type ServicesIn<R> = R extends Subtree<any, infer S> ? S : never
+type Own<R> = Exclude<R, Subtree<any, any>>
+/** Every typed error of a component with `E` and `R`, its subtree's included. */
+export type Errors<E, R> = [E | ErrorsIn<R>][0]
+/** Every service a component with `R` needs, its subtree's included, `Instance` excluded. */
+export type Services<R> = [Exclude<Own<R> | ServicesIn<R>, Instance>][0]
+type Lift<E, R> = [E | R] extends [never] ? never : Subtree<[E][0], [R][0]>
+
+/**
+ * Rejects components that require `Scope`: during a render it would be the
+ * session's scope, so every render would add a finalizer to it.
+ */
+export type NoScope<R> = [Extract<R, Scope.Scope>] extends [never] ? unknown
+  : { readonly "effect-lsc: this component requires Scope; acquire resources with View.once": never }
+
+/**
+ * Brings a component with services or typed errors into the current
+ * component, and returns it as a closed component usable as a JSX tag.
+ * Its errors and services, and those of its own subtree, are recorded in
+ * the caller's `Subtree`, so they reach the root's type.
+ *
+ * At runtime it returns the same function: the child keeps its instance
+ * and state, and `use` takes no slot, so it may be called conditionally.
+ *
+ * ```tsx
+ * const App = View.Component(function*() {
+ *   const Item = yield* View.use(TodoItem)
+ *   return <ul>{todos.map((todo) => <Item key={todo.id} todo={todo} />)}</ul>
+ * })
+ * ```
+ */
+export const use = <Args extends [props?: any], E = never, R = never>(
+  component: ((...args: Args) => Child | Effect.Effect<Child, E, R>) & NoScope<Services<R>>
+): Effect.Effect<Signature<Args, Effect.Effect<Child, never, Instance>>, never, Lift<Errors<E, R>, Services<R>>> =>
+  Effect.succeed(component as any)
+
+/**
+ * Renders a tree, or a component with its props, to an HTML string with a
+ * throwaway, disconnected session. Handlers are rendered as ids but
+ * nothing is listening for them. A component's typed errors and services,
+ * its subtree's included, become those of the returned Effect.
+ */
+export const render: {
+  <E = never, R = never>(
+    component: (() => Child | Effect.Effect<Child, E, R>) & NoScope<Services<R>>
+  ): Effect.Effect<string, Errors<E, R>, Services<R>>
+  <P, E = never, R = never>(
+    component: ((props: P) => Child | Effect.Effect<Child, E, R>) & NoScope<Services<R>>,
+    props: P
+  ): Effect.Effect<string, Errors<E, R>, Services<R>>
+  (child: Child): Effect.Effect<string>
+} = ((child: any, props?: any): Effect.Effect<string, any, any> =>
+  Effect.scoped(Effect.flatMap(makeSession(false), (session) =>
+    render_(session, typeof child === "function" ? jsx(child, props ?? {}) : child)))) as any

@@ -4,6 +4,7 @@
 Phoenix LiveView, built on [Effect](https://effect.website) v4 and plain JSX.
 
 - components execute on the server, as Effects
+- the services and typed errors of child components appear in the parent's type
 - state lives on the server
 - JSX describes the UI; event callbacks stay on the server
 - the browser runs one small, generic runtime (17.1 KB inlined, 6.2 KB gzipped),
@@ -93,6 +94,27 @@ all tabs connected to the same server process share one counter. See the
 [complete example](./examples/shared-counter/index.tsx) for a shared total
 alongside a count local to each tab.
 
+## Services and typed errors
+
+A component used as a JSX tag must not need services or fail with typed
+errors; the `View` helpers such as `View.State` do not count. A component
+that does is brought into its parent with `View.use`, which returns it as a
+closed component:
+
+```tsx
+const TodoList = View.Component(function*() {
+  const todos = yield* Todos
+  const Item = yield* View.use(TodoItem) // TodoItem needs Todos too
+  const all = yield* View.watch(todos.all)
+  return <ul>{all.map((todo) => <Item key={todo.id} todo={todo} />)}</ul>
+})
+```
+
+`use` adds the child's services and typed errors, and those of its own
+children, to the parent's type, so `Server.mount` requires every service
+the tree uses. Handle typed errors in the body that raises them. See
+[services and typed errors](./ARCHITECTURE.md#services-and-typed-errors-across-components).
+
 ## Running the examples
 
 ```sh
@@ -150,7 +172,9 @@ bun run runtime       # regenerate the browser runtime and vendored idiomorph
 ```
 
 Type tests live in `test/types/*.tsx`. `bun run check` compiles them, and
-each `@ts-expect-error` in them must hide a real error.
+each `@ts-expect-error` in them must hide a real error. The deliberate
+mistakes in `test/types/messages` are compiled by `bun run test`, which
+checks that each error names the fix.
 
 Browser tests use Playwright's Chromium (`bunx playwright install chromium`)
 or an installed Google Chrome. They check DOM updates, element identity,

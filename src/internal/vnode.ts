@@ -8,6 +8,7 @@
 import type * as Cause from "effect/Cause"
 import type * as Effect from "effect/Effect"
 import { hasProperty } from "effect/Predicate"
+import type { Instance } from "./instance.ts"
 
 export const TypeId = "~effect-lsc/VNode" as const
 export type TypeId = typeof TypeId
@@ -24,9 +25,52 @@ export type Props = { readonly [key: string]: unknown; readonly children?: Child
 /**
  * A component: a function from props to a `Child`, optionally wrapped in an
  * `Effect`. Effectful components can use `View.State`, `View.watch` and any
- * Effect service available in the server context.
+ * Effect service; a component with services or typed errors is brought
+ * into its parent with `View.use`.
  */
 export type ComponentFn<P, E = never, R = never> = (props: P) => Child | Effect.Effect<Child, E, R>
+
+/**
+ * A component that can appear as a JSX tag: it has no typed errors and
+ * requires no service besides `Instance`, which the renderer provides.
+ * A component with requirements or errors is brought into a parent with
+ * `View.use`, which moves them into the parent's type.
+ */
+export type ClosedComponent<P> = (props: P) => Child | Effect.Effect<Child, never, Instance>
+
+/**
+ * What JSX accepts as a tag: `ClosedComponent`, with the requirements
+ * widened by a literal type no component requires, so a tag rejected for
+ * its services contains `... is not assignable to type '"effect-lsc:
+ * bring it in with View.use" | Instance'`. The error channel stays `never`:
+ * a literal there would let `E = any` through.
+ */
+export type ElementComponent = (props: any) => Child | Effect.Effect<Child, never, Instance | ServiceHint>
+type ServiceHint = "effect-lsc: bring it in with View.use"
+
+/**
+ * The check `ElementComponent` misses on a generic tag: TypeScript
+ * relates it to `(props: any) => ...` without checking the errors and
+ * services its type parameters give. Read with `infer`, the return has
+ * them erased to `unknown`, so such a tag gets a required prop named
+ * after the fix, even when its instantiation would be closed. Applied by
+ * `JSX.LibraryManagedAttributes` and the factories; `unknown` for every
+ * other tag. It is an indexed access, not a conditional type: for a tag
+ * whose type is a type parameter, a conditional type would stay deferred
+ * and reject every prop, while the index resolves through the
+ * parameter's constraint.
+ */
+export type TagCheck<C> = {
+  readonly closed: unknown
+  readonly open: { readonly [K in ServiceHint]: never }
+}[TagKind<C>]
+type TagKind<C> = C extends ElementComponent
+  ? C extends (props: any) => infer Out ? ClosedReturn<Extract<Out, Effect.Effect<any, any, any>>> : "closed"
+  : "closed"
+/** `ServiceHint` is left out, so a tag typed `ElementComponent` itself is closed. */
+type ClosedReturn<Eff> = [Effect.Error<Eff> | Exclude<Effect.Services<Eff>, Instance | ServiceHint>] extends [never]
+  ? "closed"
+  : "open"
 
 export interface Element {
   readonly [TypeId]: TypeId

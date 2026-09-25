@@ -11,7 +11,7 @@ const say = (line: string) => Effect.sync(() => console.log(`fixture: ${line}`))
 
 const Risky = View.Component(function*(p: { readonly limit: number }) {
   const n = yield* View.State(0)
-  if (n.value > p.limit) return yield* Effect.fail(new Error(`over the limit: ${n.value}`))
+  if (n.value > p.limit) return yield* Effect.die(new Error(`over the limit: ${n.value}`))
   return <button id="risky" onClick={() => n.update((x) => x + 1)}>risky {n.value}</button>
 })
 

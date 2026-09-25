@@ -34,9 +34,9 @@ import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Socket from "effect/unstable/socket/Socket"
-import type { Instance } from "./instance.ts"
 import { type MountOptions, originAllowed, page, session } from "./server.ts"
 import type { ComponentFn } from "./vnode.ts"
+import type { Services } from "./view.ts"
 
 /**
  * The Workers globals this module uses, typed locally so the library does
@@ -64,7 +64,7 @@ const isUpgrade = (request: Request) => request.headers.get("upgrade")?.toLowerC
 /**
  * A `fetch` handler serving `component` from a Durable Object.
  */
-export const app = <E, R>(component: ComponentFn<{}, E, R>, options: AppOptions<Exclude<R, Instance>>): App => {
+export const app = <E, R>(component: ComponentFn<{}, E, R>, options: AppOptions<Services<R>>): App => {
   const runtime = ManagedRuntime.make(options.layer)
   const fetch = async (request: Request): Promise<Response> => {
     if (!isUpgrade(request)) {
