@@ -69,10 +69,11 @@ same shared state are serialized, including updates from different sessions.
 Sharing does not imply persistence: the state lasts as long as its owner.
 
 **Call `View.State`, `View.watch` and `View.once` in the same order on each
-render.** They occupy slots in the component instance. Keep the source
-passed to each `watch` stable, since its subscription is established on the
-first render. A component's own state is tracked automatically; state from
-elsewhere must be watched:
+render.** They occupy slots in the component instance. A `watch` slot
+follows its source: when a later render passes a different one at the same
+position, such as a new handle in the props, it subscribes to the new source
+and releases the old one. A component's own state is tracked automatically;
+state from elsewhere must be watched:
 
 ```tsx
 const CountLabel = View.Component(function*(props: {

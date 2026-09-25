@@ -113,3 +113,35 @@ export const shallowEqualProps = (a: Props | undefined, b: Props): boolean => {
   }
   return true
 }
+
+interface Subscription {
+  key: ReadonlyArray<unknown>
+  release: Effect.Effect<void>
+}
+
+/**
+ * One slot holding a subscription that follows its source: when a later
+ * render passes a different source at the same position (a `State` handle
+ * from new props), it subscribes to the new one first, then releases the
+ * old one. `subscribe` returns the release; the last one runs when the
+ * instance scope closes.
+ */
+export const follow = (
+  instance: InstanceShape,
+  key: ReadonlyArray<unknown>,
+  subscribe: Effect.Effect<Effect.Effect<void>>
+): Effect.Effect<void> =>
+  Effect.gen(function*() {
+    const subscription = yield* instance.slot(Effect.acquireRelease(
+      Effect.map(subscribe, (release): Subscription => ({ key, release })),
+      (subscription) => Effect.suspend(() => subscription.release)
+    ))
+    if (sameKey(subscription.key, key)) return
+    const previous = subscription.release
+    subscription.release = yield* subscribe
+    subscription.key = key
+    yield* previous
+  })
+
+const sameKey = (a: ReadonlyArray<unknown>, b: ReadonlyArray<unknown>): boolean =>
+  a.length === b.length && a.every((value, index) => value === b[index])

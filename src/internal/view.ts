@@ -17,6 +17,7 @@ import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import { dual, identity } from "effect/Function"
 import * as Layer from "effect/Layer"
 import { type Pipeable, pipeArguments } from "effect/Pipeable"
@@ -25,7 +26,7 @@ import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Types from "effect/Types"
-import { Instance } from "./instance.ts"
+import { follow, Instance } from "./instance.ts"
 import { render as render_ } from "./render.ts"
 import { makeSession } from "./session.ts"
 import type { Boundary, Child, ClosedComponent, Props } from "./vnode.ts"
@@ -285,30 +286,23 @@ export const SharedState = <A>(initial: A): Effect.Effect<SharedState<A>> =>
  */
 export type Watchable<A> = State<A> | SharedState<A> | SubscriptionRef.SubscriptionRef<A>
 
-/** Subscribes the instance to a ref: every change invalidates it. */
-const subscribeRef = <A>(
-  ref: SubscriptionRef.SubscriptionRef<A>,
-  instance: Instance["Service"]
-): Effect.Effect<void, never, Scope.Scope> =>
-  SubscriptionRef.changes(ref).pipe(
-    Stream.drop(1),
-    Stream.runForEach(() => instance.invalidate),
-    Effect.forkIn(instance.scope, { startImmediately: true }),
-    Effect.asVoid
-  )
-
-const subscribe = <A>(source: Watchable<A>, instance: Instance["Service"]): Effect.Effect<void, never, Scope.Scope> => {
+/** Subscribes the instance to a source; the result releases the subscription. */
+const subscribe = <A>(source: Watchable<A>, instance: Instance["Service"]): Effect.Effect<Effect.Effect<void>> => {
   if (StateTypeId in source) {
     const add = subscribers.get(source)!
-    return Effect.acquireRelease(
-      Effect.sync(() => add(instance.invalidate)),
-      (unsubscribe) => Effect.sync(unsubscribe)
-    ).pipe(Effect.asVoid)
+    // a listener of its own: releasing it must not remove the owner's, which
+    // is the same `invalidate` when a component watches its own state
+    return Effect.sync(() => Effect.sync(add(Effect.suspend(() => instance.invalidate))))
   }
   const ref: SubscriptionRef.SubscriptionRef<A> = SharedStateTypeId in source
     ? refs.get(source)!
     : source as SubscriptionRef.SubscriptionRef<A>
-  return subscribeRef(ref, instance)
+  return SubscriptionRef.changes(ref).pipe(
+    Stream.drop(1),
+    Stream.runForEach(() => instance.invalidate),
+    Effect.forkIn(instance.scope, { startImmediately: true }),
+    Effect.map((fiber) => Fiber.interrupt(fiber))
+  )
 }
 
 const read = <A>(source: Watchable<A>): A =>
@@ -320,9 +314,14 @@ const read = <A>(source: Watchable<A>): A =>
  * Reads a state and re-renders the component whenever it changes. This is
  * how a component depends on state it does not own: a `SharedState` from a
  * service, or a `State` handle received from a parent.
+ *
+ * Each call is a slot, like `View.State`. When a later render passes a
+ * different source at the same position (a new handle in the props), the
+ * slot follows it: it subscribes to the new source and releases the old one.
  */
 export const watch = <A>(source: Watchable<A>): Effect.Effect<A, never, Instance> =>
-  Effect.flatMap(Instance, (instance) => Effect.map(instance.slot(subscribe(source, instance)), () => read(source)))
+  Effect.flatMap(Instance, (instance) =>
+    Effect.map(follow(instance, [source], subscribe(source, instance)), () => read(source)))
 
 /**
  * Runs `effect` once per component instance, on its first render, in the
