@@ -90,6 +90,20 @@ const removeInstance = (ctx: RenderContext, path: string, instance: InstanceHand
   ctx.removed.push([path, instance])
 }
 
+/**
+ * Takes an instance off the session with everything nested inside it, as
+ * of its last render. A component replaced by one of another type remounts
+ * its whole subtree: the instances below point to it as their parent, and
+ * may hold what it provided.
+ */
+const removeSubtree = (ctx: RenderContext, path: string, instance: InstanceHandle): void => {
+  for (const childPath of instance.children) {
+    const child = ctx.session.instances.get(childPath)
+    if (child !== undefined) removeSubtree(ctx, childPath, child)
+  }
+  removeInstance(ctx, path, instance)
+}
+
 interface Builder {
   readonly s: Array<string>
   readonly d: Array<Dyn>
@@ -263,7 +277,7 @@ const buildComponent = (
     let instance = ctx.session.instances.get(path)
     if (instance !== undefined && instance.type !== node.type) {
       yield* warnRemount(instance.type, node.type, path)
-      removeInstance(ctx, path, instance)
+      removeSubtree(ctx, path, instance)
       instance = undefined
     }
     if (instance === undefined) {

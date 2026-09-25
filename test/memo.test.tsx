@@ -103,6 +103,27 @@ describe("memoization", () => {
       assert.deepStrictEqual(runs, { app: 2, watcher: 2, sibling: 1 })
     }))
 
+  it.effect("a component replaced by another type remounts its whole subtree", () =>
+    Effect.gen(function*() {
+      const Counter = View.Component(function*() {
+        const n = yield* View.State(0)
+        return <b onClick={() => n.update((x) => x + 1)}>{n.value}</b>
+      })
+      const A = () => <Counter />
+      const B = () => <Counter />
+      const App = (p: { readonly b: boolean }) => p.b ? <B /> : <A />
+      const session = yield* makeSession()
+      yield* render(session, <App b={false} />)
+      yield* click(session, "r.0.0.0")
+      assert.strictEqual(yield* render(session, <App b={false} />), `<b data-lsc-click="r.0.0.0">1</b>`)
+      // Counter sits at the same path under B, but it belongs to the old A
+      assert.strictEqual(yield* render(session, <App b={true} />), `<b data-lsc-click="r.0.0.0">0</b>`)
+      // its state changes reach B, its new parent
+      yield* click(session, "r.0.0.0")
+      assert.strictEqual(yield* render(session, <App b={true} />), `<b data-lsc-click="r.0.0.0">1</b>`)
+      assert.strictEqual(session.instances.get("r.0.0")!.parent, session.instances.get("r.0"))
+    }))
+
   it.effect("instances and handlers of a removed memoized subtree are disposed", () =>
     Effect.gen(function*() {
       const closed = yield* Deferred.make<void>()
