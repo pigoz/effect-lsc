@@ -137,6 +137,34 @@ describe("failure semantics", () => {
       assert.strictEqual(yield* render(session, <App />), "<b>2</b>")
     }))
 
+  it.effect("a component in the fallback does not replace the component that failed", () =>
+    Effect.gen(function*() {
+      const Retry = View.Component(function*() {
+        const clicks = yield* View.State(0)
+        return <button onClick={() => clicks.update((n) => n + 1)}>retry {clicks.value}</button>
+      })
+      const Bad = View.Component(function*(p: { readonly explode: boolean }) {
+        const n = yield* View.State(0)
+        if (p.explode) return yield* Effect.die("boom")
+        return <b onClick={() => n.update((x) => x + 1)}>{n.value}</b>
+      })
+      const App = (p: { readonly explode: boolean }) => (
+        <View.ErrorBoundary fallback={() => <Retry />}>
+          <Bad explode={p.explode} />
+        </View.ErrorBoundary>
+      )
+      const session = yield* makeSession()
+      assert.strictEqual(yield* render(session, <App explode={false} />), `<b data-lsc-click="r.0.0.0">0</b>`)
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.0.0" })
+      // the fallback renders under the boundary's `f` path, beside Bad
+      assert.strictEqual(yield* render(session, <App explode={true} />), `<button data-lsc-click="r.0.f.0.0">retry 0</button>`)
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.f.0.0" })
+      assert.strictEqual(yield* render(session, <App explode={true} />), `<button data-lsc-click="r.0.f.0.0">retry 1</button>`)
+      // the retry finds Bad's instance and state; the fallback's instance is closed
+      assert.strictEqual(yield* render(session, <App explode={false} />), `<b data-lsc-click="r.0.0.0">1</b>`)
+      assert.isFalse(session.instances.has("r.0.f.0"))
+    }))
+
   it.effect("a boundary can recover with an Effect, and a failing recovery reaches the boundary above", () =>
     Effect.gen(function*() {
       const Bad = View.Component(function*(p: { readonly explode: boolean }) {

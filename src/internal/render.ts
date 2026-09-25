@@ -1,9 +1,9 @@
 /**
  * Renders a `Child` tree into a wire `Node` for a session.
  *
- * Every node has a path (`r.0.2.k42.1`): array indices, or `k<key>` for keyed
- * children. Paths are stable across renders for the same tree position, and
- * are used for two things:
+ * Every node has a path (`r.0.2.k42.1`): array indices, `k<key>` for keyed
+ * children, and `f` before the fallback of a boundary. Paths are stable
+ * across renders for the same tree position, and are used for two things:
  *
  * - component instances live at their path, so `View.State` persists
  * - event handlers are registered under their element path, which is what
@@ -108,6 +108,9 @@ export const rootPath = "r"
 
 const childPath = (path: string, index: number, key: string | undefined) =>
   key === undefined ? `${path}.${index}` : `${path}.k${key}`
+
+/** Where a boundary renders its fallback: beside its children, never at their paths. */
+const fallbackPath = (path: string) => `${path}.f`
 
 const keyOf = (child: Child): string | undefined => isVNode(child) && child._tag !== "Raw" ? child.key : undefined
 
@@ -294,13 +297,14 @@ const buildComponent = (
         // The subtree failed: forget what the failed attempt registered and
         // render the fallback in its place. The instances it reached are
         // kept; the boundary re-renders (and retries) when its subtree
-        // changes. A failing recovery passes the failure to the next
-        // boundary up.
+        // changes. The fallback has paths of its own, so its components
+        // never replace them. A failing recovery passes the failure to the
+        // next boundary up.
         discardAttempt(ctx.session, current)
         const recovered = recover(cause, node.props)
         const fallback: Child = Effect.isEffect(recovered) ? yield* (recovered as Effect.Effect<Child, unknown>) : recovered
         const own = newBuilder()
-        yield* renderChildren(ctx, own, fallback, path, false)
+        yield* renderChildren(ctx, own, fallback, fallbackPath(path), false)
         return finish(own, isElement(fallback))
       }))
     return yield* rendered.pipe(

@@ -452,10 +452,9 @@ on subtree changes; they do not poll or automatically fix the error. A
 fallback removes the event handlers of the failed subtree. Components the
 failed render reached, including the one that failed, keep their instances
 and state for the retry. Components it did not reach, such as siblings after
-the failing one, are closed and lose their state. The fallback renders in
-the children's position, so a component in the fallback replaces the
-component at the same position: with `fallback={() => <Retry />}`,
-`<Chart />` is closed and loses its state.
+the failing one, are closed and lose their state. The fallback has paths
+of its own, so a component in it, such as `fallback={() => <Retry />}`,
+does not replace `<Chart />`. It is closed when a retry succeeds.
 
 When a socket closes, its session scope closes too: running handlers,
 component tasks and subscriptions are interrupted and cleaned up. A
@@ -519,13 +518,13 @@ them, such as `() => <Retry />`, instead. Return another boundary as a tag
 too, as in `(_, props) => <Fallback {...props} />`: the call
 `Fallback(props)` is rejected with the same message.
 
-The boundary is the instance of the component it wraps, at the same path.
-Like `View.ErrorBoundary`, it retries when its subtree changes, and the
+The boundary is the instance of the component it wraps, at the same path;
+in a chain of helpers, each further one adds a level. Like
+`View.ErrorBoundary`, it retries when its subtree changes, and the
 components the failed render reached keep their state. The handler's
-output renders in the body's position: a component there, such as
-`<Retry />`, replaces the body's component at the same position, which
-loses its state. Called as a function, `yield* Member(props)`, it returns
-a node of itself, so the boundary still applies.
+output renders under paths of its own, as a fallback does. Called as a
+function, `yield* Member(props)`, it returns a node of itself, so the
+boundary still applies.
 
 **Define boundaries at module level.** Applied in a body, as in
 `View.use(View.orDie(Item))`, the helper creates a new component on every
@@ -556,9 +555,10 @@ this coalescing is not a transaction around a whole handler.
 ### Identity and component reuse
 
 Instances are identified by their path in the tree: positional children use
-paths such as `r.0.1`, keyed children paths such as `r.0.k42`. The same
-component type at the same path reuses its instance and state slots. Keys
-must be unique among siblings.
+paths such as `r.0.1`, keyed children paths such as `r.0.k42`, and a
+boundary's fallback paths such as `r.0.f.0`. The same component type at the
+same path reuses its instance and state slots. Keys must be unique among
+siblings.
 
 A state change marks its owner or subscribers and their ancestors dirty.
 Ancestors must be revisited because their cached output includes child
