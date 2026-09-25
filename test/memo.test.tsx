@@ -124,6 +124,31 @@ describe("memoization", () => {
       assert.strictEqual(session.instances.get("r.0.0")!.parent, session.instances.get("r.0"))
     }))
 
+  it.effect("a component whose parent changes remounts", () =>
+    Effect.gen(function*() {
+      const Counter = View.Component(function*() {
+        const n = yield* View.State(0)
+        return <b onClick={() => n.update((x) => x + 1)}>{n.value}</b>
+      })
+      const Wrapper = View.Component(function*() {
+        return <Counter />
+      })
+      const App = (p: { readonly wrapped: boolean }) => p.wrapped ? <Wrapper /> : <div><Counter /></div>
+      const session = yield* makeSession()
+      yield* render(session, <App wrapped={false} />)
+      yield* click(session, "r.0.0.0")
+      assert.strictEqual(yield* render(session, <App wrapped={false} />), `<div><b data-lsc-click="r.0.0.0">1</b></div>`)
+      // Counter sits at the same path under Wrapper, but it belongs to App
+      assert.strictEqual(yield* render(session, <App wrapped={true} />), `<b data-lsc-click="r.0.0.0">0</b>`)
+      // its state changes reach Wrapper, its new parent, which is memoized
+      yield* click(session, "r.0.0.0")
+      assert.strictEqual(yield* render(session, <App wrapped={true} />), `<b data-lsc-click="r.0.0.0">1</b>`)
+      assert.strictEqual(session.instances.get("r.0.0")!.parent, session.instances.get("r.0"))
+      // and back under App
+      assert.strictEqual(yield* render(session, <App wrapped={false} />), `<div><b data-lsc-click="r.0.0.0">0</b></div>`)
+      assert.strictEqual(session.instances.get("r.0.0")!.parent, session.instances.get("r"))
+    }))
+
   it.effect("instances and handlers of a removed memoized subtree are disposed", () =>
     Effect.gen(function*() {
       const closed = yield* Deferred.make<void>()

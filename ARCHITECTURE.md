@@ -754,9 +754,13 @@ handled while a render waits.
 Instances are identified by their path in the tree: positional children use
 paths such as `r.0.1`, keyed children paths such as `r.0.k42`, and a
 boundary's fallback paths such as `r.0.f.0`. The same component type at the
-same path reuses its instance and state slots. A component of another type
-at that path remounts the whole subtree, even the components below it that
-keep their type. Keys must be unique among siblings.
+same path, under the same parent component, reuses its instance and state
+slots. A component of another type at that path remounts the whole subtree,
+even the components below it that keep their type. A component whose parent
+changes remounts too. In `q ? <Q /> : <div><C /></div>`, where Q renders
+`<C />`, C has the same path in both branches, but it remounts each time
+`q` changes and gets the services provided above its new place. Keys must
+be unique among siblings.
 
 A state change marks its owner or subscribers and their ancestors dirty.
 Ancestors must be revisited because their cached output includes child

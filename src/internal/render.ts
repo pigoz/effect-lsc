@@ -100,9 +100,9 @@ const removeInstance = (ctx: RenderContext, path: string, instance: InstanceHand
 
 /**
  * Takes an instance off the session with everything nested inside it, as
- * of its last render. A component replaced by one of another type remounts
- * its whole subtree: the instances below point to it as their parent, and
- * may hold what it provided.
+ * of its last render. A component replaced by one of another type, or under
+ * another parent, remounts its whole subtree: the instances below point to
+ * it as their parent, and may hold what it provided.
  */
 const removeSubtree = (ctx: RenderContext, path: string, instance: InstanceHandle): void => {
   for (const childPath of instance.children) {
@@ -282,15 +282,18 @@ const buildComponent = (
   path: string
 ): Effect.Effect<Node, unknown> =>
   Effect.gen(function*() {
+    const parent = ctx.current === ctx.session.root ? undefined : ctx.current as InstanceHandle
     let instance = ctx.session.instances.get(path)
-    if (instance !== undefined && instance.type !== node.type) {
-      yield* warnRemount(instance.type, node.type, path)
+    // Another type remounts, and so does the same type under another parent
+    // (`q ? <Q /> : <div><C /></div>`, where Q renders `<C />`): a reused C
+    // would still invalidate its old parent, and hold what that provided.
+    if (instance !== undefined && (instance.type !== node.type || instance.parent !== parent)) {
+      if (instance.type !== node.type) yield* warnRemount(instance.type, node.type, path)
       removeSubtree(ctx, path, instance)
       instance = undefined
     }
     if (instance === undefined) {
       const scope = yield* Scope.fork(ctx.session.scope)
-      const parent = ctx.current === ctx.session.root ? undefined : ctx.current as InstanceHandle
       const dirty = ctx.session.dirty
       const wake = () => {
         Queue.offerUnsafe(dirty, undefined)

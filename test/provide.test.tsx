@@ -79,6 +79,38 @@ describe("View.provide", () => {
       assert.deepStrictEqual(log, ["build", "child uses 1", "release", "build", "child uses 2", "release"])
     }))
 
+  it.effect("a component moved out of or into it remounts with the services above it", () =>
+    Effect.gen(function*() {
+      const log: Array<string> = []
+      const Child = View.Component(function*() {
+        const cache = yield* Cache
+        yield* View.once(Effect.addFinalizer(() => Effect.sync(() => { log.push(`child uses ${cache.id}`) })))
+        return <b onClick={() => { log.push(`click uses ${cache.id}`) }}>{cache.id}</b>
+      })
+      const Middle = View.Component(function*() {
+        const C = yield* View.use(Child)
+        return <C />
+      })
+      const WithCache = View.provide(Middle, logged(log))
+      // Child sits at r.0.0 in both branches, under another parent
+      const Page = View.Component(function*(p: { readonly cached: boolean }) {
+        const C = yield* View.use(Child)
+        return p.cached ? <WithCache /> : <div><C /></div>
+      })
+      const app = Layer.succeed(Cache, { id: 100 })
+      const session = yield* makeSession()
+      const renderPage = (cached: boolean) => render(session, jsx(Page, { cached })).pipe(Effect.provide(app))
+      assert.strictEqual(yield* renderPage(true), `<b data-lsc-click="r.0.0.0">1</b>`)
+      // out of it: the child closes before the layer is released
+      assert.strictEqual(yield* renderPage(false), `<div><b data-lsc-click="r.0.0.0">100</b></div>`)
+      assert.deepStrictEqual(log, ["build", "child uses 1", "release"])
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.0.0" })
+      assert.deepStrictEqual(log.slice(3), ["click uses 100"])
+      // into it
+      assert.strictEqual(yield* renderPage(true), `<b data-lsc-click="r.0.0.0">2</b>`)
+      assert.deepStrictEqual(log.slice(4), ["build", "child uses 100"])
+    }))
+
   it.effect("a failing finalizer is logged and does not fail the render", () =>
     Effect.gen(function*() {
       const logs: Array<string> = []
