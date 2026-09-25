@@ -17,11 +17,15 @@ const at = (line: number) => output.split("\n").filter((l) => l.startsWith(`test
 
 describe("type error messages", () => {
   it("a component with services used as a tag says to bring it in with View.use", () => {
-    assert.isTrue(at(15))
+    assert.isTrue(at(19))
     assert.include(output, "effect-lsc: bring it in with View.use")
   })
   it("a component requiring Scope says to acquire resources with View.once", () => {
-    assert.isTrue(at(16))
+    assert.isTrue(at(20))
     assert.include(output, "effect-lsc: this component requires Scope; acquire resources with View.once")
+  })
+  it("a recovery handler using View.State says to return a component instead", () => {
+    assert.isTrue(at(21))
+    assert.include(output, "effect-lsc: recovery runs outside the instance; return a component that uses View.State instead")
   })
 })

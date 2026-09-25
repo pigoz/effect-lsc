@@ -3,7 +3,7 @@
 import { Effect, Layer } from "effect"
 import { jsx } from "effect-lsc/jsx-runtime"
 import { View } from "effect-lsc/view"
-import { check, Db, Denied, type Equals, NotFound } from "./util.ts"
+import { check, Db, Denied, type Equals, type Fn, NotFound } from "./util.ts"
 
 // --- closed components go straight into JSX ---------------------------------
 const Plain = (props: { readonly name: string }) => <b>{props.name}</b>
@@ -28,12 +28,12 @@ export const wrongProp = <Plain name={1} />
 export const genericMisuse = <Generic item={1} show={(n) => n.toUpperCase()} />
 
 // --- View.Component keeps the body's parameters ------------------------------
-check<Equals<typeof Local, () => Effect.Effect<View.VNode, never, View.Instance>>>()
+check<Equals<Fn<typeof Local>, () => Effect.Effect<View.VNode, never, View.Instance>>>()
 const Named = View.Component(function*(props: { readonly name: string }) {
   const n = yield* View.State(props.name)
   return <b>{n.value}</b>
 })
-check<Equals<typeof Named, (props: { readonly name: string }) => Effect.Effect<View.VNode, never, View.Instance>>>()
+check<Equals<Fn<typeof Named>, (props: { readonly name: string }) => Effect.Effect<View.VNode, never, View.Instance>>>()
 // @ts-expect-error missing prop
 export const missing = <Named />
 
@@ -79,14 +79,14 @@ const List = View.Component(function*() {
   const Item = yield* View.use(Find)
   return <ul><Item id="1" /><Item id="2" /></ul>
 })
-check<Equals<typeof List, () => Effect.Effect<View.VNode, never, View.Subtree<NotFound, Db>>>>()
+check<Equals<Fn<typeof List>, () => Effect.Effect<View.VNode, never, View.Subtree<NotFound, Db>>>>()
 // transitive, and merged into one Subtree
 const Page = View.Component(function*() {
   const L = yield* View.use(List)
   const F = yield* View.use(Fails)
   return <main><L /><F /></main>
 })
-check<Equals<typeof Page, () => Effect.Effect<View.VNode, never, View.Subtree<NotFound | Denied, Db>>>>()
+check<Equals<Fn<typeof Page>, () => Effect.Effect<View.VNode, never, View.Subtree<NotFound | Denied, Db>>>>()
 // a used component is closed, with its props
 export const usedProps = Effect.gen(function*() {
   const Item = yield* View.use(Find)

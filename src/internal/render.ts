@@ -225,6 +225,21 @@ const renderElement = (
 }
 
 /**
+ * A boundary replaced by another wrapper of the same component remounts,
+ * losing its state. The renderer cannot tell two module-level wrappers
+ * swapped at one path from a helper applied during a render
+ * (`View.use(View.orDie(Item))` in a body), which creates a new component
+ * on every render and remounts it every time. The warning fits both.
+ */
+const warnRemount = (previous: unknown, next: unknown, path: string): Effect.Effect<void> =>
+  isBoundary(previous) && isBoundary(next) && boundaryOf(previous).render === boundaryOf(next).render
+    ? Effect.logWarning(
+      `effect-lsc: the component at ${path} was replaced by another wrapper of the same component ` +
+        "and remounted, losing its state; if the wrapper is created during a render, define it at module level"
+    )
+    : Effect.void
+
+/**
  * Renders a component at `path` into its own node, creating or reusing the
  * instance that lives there. An instance that is not dirty and receives the
  * same props returns the node of its previous render, subtree and handlers
@@ -238,6 +253,7 @@ const buildComponent = (
   Effect.gen(function*() {
     let instance = ctx.session.instances.get(path)
     if (instance !== undefined && instance.type !== node.type) {
+      yield* warnRemount(instance.type, node.type, path)
       yield* closeInstance(ctx.session, path, instance)
       instance = undefined
     }

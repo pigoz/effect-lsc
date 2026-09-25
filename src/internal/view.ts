@@ -6,21 +6,25 @@
  * - `View.State` creates component-local state that survives re-renders
  * - `View.SharedState` creates state shared by components and sessions
  * - `View.watch` makes a component re-render when a state changes
+ * - `View.catchTag`, `View.catchTags`, `View.orDie` handle typed render errors
  * - `View.render` renders a tree to HTML once (handy for tests)
  *
  * Components run on the server and re-run when their state changes; the
  * resulting patches are merged into the page by the browser runtime.
  */
-import type * as Cause from "effect/Cause"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
-import { identity } from "effect/Function"
+import { dual, identity } from "effect/Function"
+import { type Pipeable, pipeArguments } from "effect/Pipeable"
+import * as Result from "effect/Result"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import type * as Types from "effect/Types"
 import { Instance } from "./instance.ts"
 import { render as render_ } from "./render.ts"
 import { makeSession } from "./session.ts"
-import type { Boundary, Child, ClosedComponent } from "./vnode.ts"
+import type { Boundary, Child, ClosedComponent, Props } from "./vnode.ts"
 import { BoundaryTypeId, Fragment as Fragment_, jsx, raw as raw_ } from "./vnode.ts"
 
 export type {
@@ -51,16 +55,23 @@ export const Fragment: typeof Fragment_ = Fragment_
  * Without a boundary, a render failure ends the session and the browser
  * remounts a fresh one.
  *
+ * Typed errors are handled where a component is defined, with
+ * `View.catchTag`, `View.catchTags` or `View.orDie`; this boundary is for
+ * defects (thrown exceptions, `orDie`, interruptions).
+ *
  * ```tsx
  * <View.ErrorBoundary fallback={(cause) => <p>Something broke</p>}>
  *   <Risky />
  * </View.ErrorBoundary>
  * ```
+ *
+ * Called as a function, it returns a node of itself, like the other
+ * boundaries, so the boundary still applies.
  */
 export const ErrorBoundary: (props: {
   readonly fallback: (cause: Cause.Cause<unknown>) => Child
   readonly children?: Child
-}) => Child = Object.assign((props: { readonly children?: Child }) => props.children, {
+}) => Child = Object.assign((props: Props): Child => jsx(ErrorBoundary, props), {
   [BoundaryTypeId]: {
     render: (props: { readonly children?: Child }) => props.children,
     recover: (cause: Cause.Cause<unknown>, props: { readonly fallback: (cause: Cause.Cause<unknown>) => Child }) =>
@@ -79,11 +90,19 @@ export const ErrorBoundary: (props: {
  */
 type Signature<Args extends [props?: any], A> = [Args] extends [[]] ? () => A : (...args: Args) => A
 
+const pipeable = <F extends Function>(f: F): any =>
+  Object.assign(f, {
+    pipe(this: unknown) {
+      return pipeArguments(this, arguments)
+    }
+  })
+
 /**
  * Defines a component from a generator body. The body runs when the
  * component renders and may `yield*` any Effect, including `View.State`.
  * The result is typed with the body's own errors and services, plus the
- * `Subtree` of the components it brought in with `View.use`.
+ * `Subtree` of the components it brought in with `View.use`. It has a
+ * `pipe` method, for `View.catchTag` and the other boundaries.
  *
  * ```tsx
  * const Counter = View.Component(function*() {
@@ -98,17 +117,18 @@ export const Component = <
   A extends Child
 >(
   body: (...args: Args) => Generator<Eff, A, never>
-): Signature<
-  Args,
-  Effect.Effect<
-    A,
-    Effect.Error<Eff>,
-    // Subtree entries merged into one. Written inline: an alias would show up in hovers.
-    | Exclude<Effect.Services<Eff>, Subtree<any, any>>
-    | ([Extract<Effect.Services<Eff>, Subtree<any, any>>] extends [never] ? never
-      : Subtree<ErrorsIn<Effect.Services<Eff>>, ServicesIn<Effect.Services<Eff>>>)
+): // Subtree entries merged into one. Written inline: an alias would show up in hovers.
+  & Signature<
+    Args,
+    Effect.Effect<
+      A,
+      Effect.Error<Eff>,
+      | Exclude<Effect.Services<Eff>, Subtree<any, any>>
+      | ([Extract<Effect.Services<Eff>, Subtree<any, any>>] extends [never] ? never
+        : Subtree<ErrorsIn<Effect.Services<Eff>>, ServicesIn<Effect.Services<Eff>>>)
+    >
   >
-> => Effect.fnUntraced(body) as any
+  & Pipeable => pipeable(Effect.fnUntraced(body))
 
 /**
  * The type of a component whose tree fails with at most `E` and needs at
@@ -126,10 +146,9 @@ export const Component = <
  * })
  * ```
  */
-export type Component<Args extends [props?: any], E = never, R = never> = Signature<
-  Args,
-  Effect.Effect<Child, E, Instance | R | Lift<E, R>>
->
+export type Component<Args extends [props?: any], E = never, R = never> =
+  & Signature<Args, Effect.Effect<Child, E, Instance | R | Lift<E, R>>>
+  & Pipeable
 
 // -----------------------------------------------------------------------------
 // Local state
@@ -336,9 +355,10 @@ declare const SubtreeTypeId: unique symbol
  * those errors and services belong to children that render after the
  * parent's body has returned, so `Effect.catchTag` or `Effect.provide`
  * around the parent cannot handle them, and the types must not pretend
- * they do. The root reads it back: `View.render` fails with its errors and
- * needs its services, `Server.mount`, `Server.page`, `Server.session` and
- * `Cloudflare.app` need its services.
+ * they do. Only render boundaries (`View.catchTag` and friends) remove
+ * its errors. The root reads it back: `View.render` fails with its errors
+ * and needs its services, `Server.mount`, `Server.page`, `Server.session`
+ * and `Cloudflare.app` need its services.
  */
 export interface Subtree<out E, out R> {
   readonly [SubtreeTypeId]: { readonly E: () => E; readonly R: () => R }
@@ -380,6 +400,155 @@ export const use = <Args extends [props?: any], E = never, R = never>(
   component: ((...args: Args) => Child | Effect.Effect<Child, E, R>) & NoScope<Services<R>>
 ): Effect.Effect<Signature<Args, Effect.Effect<Child, never, Instance>>, never, Lift<Errors<E, R>, Services<R>>> =>
   Effect.succeed(component as any)
+
+/**
+ * A component that renders `component` inside a boundary. Rendered as a
+ * tag, the renderer runs `component` as its body; called as a function, it
+ * returns a node of itself, so the boundary is never skipped. It has the
+ * instance and the path of the component it wraps.
+ */
+const boundary = (component: (props: any) => Child | Effect.Effect<Child, any, any>, spec: Omit<Boundary, "render">): any => {
+  const self: any = pipeable(Object.assign((props?: Props) => Effect.succeed(jsx(self, props ?? {})), {
+    [BoundaryTypeId]: { render: component, ...spec } satisfies Boundary
+  }))
+  return self
+}
+
+/**
+ * Rejects recovery handlers that use `View.State`, `View.watch` or
+ * `View.once`: recovery runs outside any instance. Return a component
+ * (`<Fallback />`) that does instead.
+ */
+type NoInstance<R> = [Extract<R, Instance>] extends [never] ? unknown
+  : { readonly "effect-lsc: recovery runs outside the instance; return a component that uses View.State instead": never }
+type Recovered<E2, R2> = (Child | Effect.Effect<Child, E2, R2>) & NoInstance<R2>
+type TagOf<K> = K extends ReadonlyArray<string> ? K[number] : K
+/** A boundary: its errors and services all surface when it renders, so they are all in `Subtree`. */
+type Bounded<Args extends [props?: any], E, R> =
+  & Signature<Args, Effect.Effect<Child, never, Instance | Lift<E, Services<R>>>>
+  & Pipeable
+
+const hasTag = (error: unknown, tags: ReadonlyArray<string>): error is { readonly _tag: string } =>
+  typeof error === "object" && error !== null && "_tag" in error && tags.includes((error as any)._tag)
+
+/**
+ * Handles typed errors with the given tag (or tags) raised while rendering
+ * `component` or anything in its subtree, rendering `f(error, props)` in
+ * its place. Other failures pass through to the next boundary. Like
+ * `Effect.catchTag`, it handles the first typed failure of the cause.
+ *
+ * It is a render boundary: it retries when its subtree changes, and it
+ * keeps the instance and path of `component`. Define it at module level;
+ * applied during a render it would create a new component every time.
+ *
+ * ```tsx
+ * const Member = View.Component(function*(props: { readonly id: string }) {
+ *   const users = yield* Users
+ *   const user = yield* users.find(props.id) // fails with UserNotFound
+ *   return <li>{user.name}</li>
+ * }).pipe(View.catchTag("UserNotFound", (error) => <li>unknown user {error.id}</li>))
+ * ```
+ */
+export const catchTag: {
+  <
+    E,
+    R,
+    Args extends [props?: any],
+    const K extends Types.Tags<Errors<E, R>> | readonly [Types.Tags<Errors<E, R>>, ...Array<Types.Tags<Errors<E, R>>>],
+    E2 = never,
+    R2 = never
+  >(
+    tag: K,
+    f: (error: NoInfer<Types.ExtractTag<Errors<E, R>, TagOf<K>>>, props: NoInfer<Args[0]>) => Recovered<E2, R2>
+  ): (
+    component: (...args: Args) => Effect.Effect<Child, E, R>
+  ) => Bounded<Args, Types.ExcludeTag<Errors<E, R>, TagOf<K>> | Errors<E2, R2>, R | R2>
+  <
+    Args extends [props?: any],
+    E,
+    R,
+    const K extends Types.Tags<Errors<E, R>> | readonly [Types.Tags<Errors<E, R>>, ...Array<Types.Tags<Errors<E, R>>>],
+    E2 = never,
+    R2 = never
+  >(
+    component: (...args: Args) => Effect.Effect<Child, E, R>,
+    tag: K,
+    f: (error: Types.ExtractTag<Errors<E, R>, TagOf<K>>, ...args: Args) => Recovered<E2, R2>
+  ): Bounded<Args, Types.ExcludeTag<Errors<E, R>, TagOf<K>> | Errors<E2, R2>, R | R2>
+} = dual(3, (component: any, tag: string | ReadonlyArray<string>, f: (error: unknown, props: unknown) => any) => {
+  const tags: ReadonlyArray<string> = typeof tag === "string" ? [tag] : tag
+  return boundary(component, {
+    recover: (cause, props) => {
+      const error = Cause.findError(cause)
+      return Result.isSuccess(error) && hasTag(error.success, tags) ? f(error.success, props) : Effect.failCause(cause)
+    }
+  })
+})
+
+type CasesOf<E, Args extends [props?: any]> = {
+  readonly [K in Types.Tags<E>]+?: (error: Types.ExtractTag<E, K>, props: Args[0]) => Child | Effect.Effect<Child, any, any>
+}
+/** The tags with a handler: an optional key, or one that may be `undefined`, may have none at runtime. */
+type HandledTags<Cases> = {
+  [K in keyof Cases]-?: {} extends Pick<Cases, K> ? never : undefined extends Cases[K] ? never : K
+}[keyof Cases]
+type CaseOutput<Cases> = {
+  [K in keyof Cases]-?: NonNullable<Cases[K]> extends (...args: any) => infer Out ? Out : never
+}[keyof Cases]
+type CaseError<Cases> = Effect.Error<Extract<CaseOutput<Cases>, Effect.Effect<any, any, any>>>
+type CaseServices<Cases> = Effect.Services<Extract<CaseOutput<Cases>, Effect.Effect<any, any, any>>>
+/**
+ * A boundary for `catchTags`. A handler that needs `Instance` cannot be
+ * rejected where it is written without losing the handlers' contextual
+ * types, so the result is unusable instead, and names the problem.
+ */
+type CatchTagsResult<Args extends [props?: any], E, R, Cases> = [Extract<CaseServices<Cases>, Instance>] extends [never]
+  ? Bounded<
+    Args,
+    Exclude<Errors<E, R>, { readonly _tag: HandledTags<Cases> }> | Errors<CaseError<Cases>, CaseServices<Cases>>,
+    R | CaseServices<Cases>
+  >
+  : { readonly "effect-lsc: recovery runs outside the instance; return a component that uses View.State instead": never }
+type NoExtraTags<Cases, E> = { readonly [K in Exclude<keyof Cases, Types.Tags<E>>]: never }
+
+/**
+ * `catchTag` for several tags at once, one handler per tag. Unknown tags
+ * are rejected.
+ */
+export const catchTags: {
+  <E, R, Args extends [props?: any], Cases extends CasesOf<Errors<E, R>, Args> & NoExtraTags<Cases, Errors<E, R>>>(
+    cases: Cases
+  ): (component: (...args: Args) => Effect.Effect<Child, E, R>) => CatchTagsResult<Args, E, R, Cases>
+  <Args extends [props?: any], E, R, Cases extends CasesOf<Errors<E, R>, Args> & NoExtraTags<Cases, Errors<E, R>>>(
+    component: (...args: Args) => Effect.Effect<Child, E, R>,
+    cases: Cases
+  ): CatchTagsResult<Args, E, R, Cases>
+} = dual(2, (component: any, cases: Record<string, ((error: unknown, props: unknown) => any) | undefined>) => {
+  const tags = Object.keys(cases).filter((tag) => cases[tag] !== undefined)
+  return boundary(component, {
+    recover: (cause, props) => {
+      const error = Cause.findError(cause)
+      return Result.isSuccess(error) && hasTag(error.success, tags)
+        ? cases[error.success._tag]!(error.success, props)
+        : Effect.failCause(cause)
+    }
+  })
+})
+
+/**
+ * Turns every typed error of `component` and its subtree into a defect,
+ * for the nearest `View.ErrorBoundary` (or the end of the session). Only
+ * the typed failures change; the rest of the cause is kept.
+ */
+export const orDie = <Args extends [props?: any], E, R>(
+  component: (...args: Args) => Effect.Effect<Child, E, R>
+): Bounded<Args, never, R> =>
+  boundary(component as any, {
+    recover: (cause) =>
+      Effect.failCause(
+        Cause.fromReasons(cause.reasons.map((reason) => Cause.isFailReason(reason) ? Cause.makeDieReason(reason.error) : reason))
+      )
+  })
 
 /**
  * Renders a tree, or a component with its props, to an HTML string with a

@@ -166,9 +166,11 @@ rows, which render after the body. `View.use` itself requires the
 `Subtree` it records, so `Effect.runSync(View.use(Member))` does not
 compile either.
 
-Handle a typed error in the body that raises it. At runtime, an unhandled
-one fails the render like a defect: `View.ErrorBoundary` catches it, but
-the types keep it in the parent's `Subtree`.
+Handle a typed error in the body that raises it, or with `View.catchTag`
+where the component is defined; see [typed errors](#typed-errors). At
+runtime, an unhandled one fails the render like a defect:
+`View.ErrorBoundary` catches it, but the types keep it in the parent's
+`Subtree`.
 
 `use` and `View.render` reject a component that requires `Scope`: during a
 render it would be the session's scope, and every render would add a
@@ -367,6 +369,7 @@ separate steps. A failure in each step has a different outcome:
 | --- | --- | --- |
 | An event handler | The server logs the error and notifies the browser. The session continues accepting events. | Existing state stays, including changes made before the failure. |
 | A component inside `View.ErrorBoundary` | The boundary shows its fallback; the rest of the page remains live. | The session stays alive. The boundary retries when its subtree is invalidated. |
+| A component with a typed error handled by `View.catchTag` or `View.catchTags` | The handler's output renders in its place; the rest of the page remains live. | The same as with `View.ErrorBoundary`. |
 | A live render without a boundary to catch it | The server reports the error and closes the socket with code 1011. The browser tries to reconnect. | Reconnecting creates fresh component-local state. |
 | The initial HTTP render | The server adapter returns HTTP 500. | No live session has started. |
 
@@ -384,12 +387,19 @@ Use a boundary to keep a failing part of the UI from ending the session:
 </View.ErrorBoundary>
 ```
 
+`View.ErrorBoundary` is for defects: thrown exceptions, components wrapped
+in `View.orDie`, and interruptions. Handle typed errors where the component
+is defined; see [typed errors](#typed-errors).
+
 Boundaries catch rendering failures, not event handler failures. They retry
 on subtree changes; they do not poll or automatically fix the error. A
 fallback removes the event handlers of the failed subtree. Components the
 failed render reached, including the one that failed, keep their instances
 and state for the retry. Components it did not reach, such as siblings after
-the failing one, are closed and lose their state.
+the failing one, are closed and lose their state. The fallback renders in
+the children's position, so a component in the fallback replaces the
+component at the same position: with `fallback={() => <Retry />}`,
+`<Chart />` is closed and loses its state.
 
 When a socket closes, its session scope closes too: running handlers,
 component tasks and subscriptions are interrupted and cleaned up. A
@@ -407,6 +417,63 @@ The browser exposes these signals for application UI and diagnostics:
 
 These signals do not display an error banner by themselves. The application
 can use them to show connection status or an error message.
+
+### Typed errors
+
+`Effect.catchTag` around a component covers its body, not its children.
+Typed render errors are handled by a render boundary instead, applied where
+the component is defined:
+
+```tsx
+const Member = View.Component(function*(props: { readonly id: string }) {
+  const users = yield* Users
+  const user = yield* users.find(props.id) // fails with UserNotFound
+  return <li>{user.name}</li>
+}).pipe(View.catchTag("UserNotFound", (_, props) => <li>Unknown user {props.id}</li>))
+```
+
+| API | Purpose |
+| --- | --- |
+| `View.catchTag(tag, f)` | Render `f(error, props)` when the component or its subtree fails with a typed error with this tag. `tag` may be an array of tags. |
+| `View.catchTags({ Tag: f, ... })` | The same for several tags, one handler per tag. An unknown tag is a type error. |
+| `View.orDie` | Turn every typed error of the component and its subtree into a defect, for `View.ErrorBoundary`. The rest of the cause is kept. |
+
+`View.Component` returns a component with a `pipe` method. Each helper also
+takes the component first: `View.catchTag(Member, "UserNotFound", f)`.
+Effect combinators such as `Effect.orDie` do not apply, since a component
+is a function, not an Effect.
+
+The result no longer fails with the handled errors. Its other errors and
+its services move to its `Subtree`, so the parent brings it in with
+`View.use`; with neither left, it is a closed component. These helpers are
+the only way to remove errors from a `Subtree`.
+
+Like `Effect.catchTag`, a boundary handles the first typed failure of the
+cause. Other failures, defects included, pass to the next boundary up. A
+handler may return an Effect: its errors and services are added to the
+result's type, and a failing handler passes its failure on. Also like
+`Effect.catchTag`, a tag given through a variable typed as a union, such
+as `tag: "NotFound" | "Denied"`, removes every member of the union from
+the type, while only the tag it holds is handled.
+
+Handlers run outside the component instance, so `View.State`, `View.watch`
+and `View.once` in a handler are type errors. Return a component that uses
+them, such as `() => <Retry />`, instead. Return another boundary as a tag
+too, as in `(_, props) => <Fallback {...props} />`: the call
+`Fallback(props)` is rejected with the same message.
+
+The boundary is the instance of the component it wraps, at the same path.
+Like `View.ErrorBoundary`, it retries when its subtree changes, and the
+components the failed render reached keep their state. The handler's
+output renders in the body's position: a component there, such as
+`<Retry />`, replaces the body's component at the same position, which
+loses its state. Called as a function, `yield* Member(props)`, it returns
+a node of itself, so the boundary still applies.
+
+**Define boundaries at module level.** Applied in a body, as in
+`View.use(View.orDie(Item))`, the helper creates a new component on every
+render. The renderer then remounts it each time, losing its state, and logs
+a warning.
 
 ## How it works
 

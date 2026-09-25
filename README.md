@@ -112,8 +112,19 @@ const TodoList = View.Component(function*() {
 
 `use` adds the child's services and typed errors, and those of its own
 children, to the parent's type, so `Server.mount` requires every service
-the tree uses. Handle typed errors in the body that raises them. See
-[services and typed errors](./ARCHITECTURE.md#services-and-typed-errors-across-components).
+the tree uses. Handle typed errors where the component is defined:
+
+```tsx
+const Member = View.Component(function*(props: { readonly id: string }) {
+  const users = yield* Users
+  const user = yield* users.find(props.id) // fails with UserNotFound
+  return <li>{user.name}</li>
+}).pipe(View.catchTag("UserNotFound", () => <li>Unknown user</li>))
+```
+
+The boundary also covers the components `Member` uses. See
+[services and typed errors](./ARCHITECTURE.md#services-and-typed-errors-across-components)
+and [typed errors](./ARCHITECTURE.md#typed-errors).
 
 ## Running the examples
 
