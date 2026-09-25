@@ -271,7 +271,11 @@ Use a boundary to keep a failing part of the UI from ending the session:
 ```
 
 Boundaries catch rendering failures, not event handler failures. They retry
-on subtree changes; they do not poll or automatically fix the error.
+on subtree changes; they do not poll or automatically fix the error. A
+fallback removes the event handlers of the failed subtree. Components the
+failed render reached, including the one that failed, keep their instances
+and state for the retry. Components it did not reach, such as siblings after
+the failing one, are closed and lose their state.
 
 When a socket closes, its session scope closes too: running handlers,
 component tasks and subscriptions are interrupted and cleaned up. A

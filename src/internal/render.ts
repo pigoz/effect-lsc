@@ -48,6 +48,22 @@ const forgetHandlers = (session: Session, owner: Owner): void => {
   owner.handlerKeys.clear()
 }
 
+/**
+ * Forgets what a failed render attempt of `owner` left behind: the handlers
+ * it registered, and the memoized nodes of the instances it rendered, which
+ * are no longer on the page. The instances and their state stay, for the
+ * next attempt.
+ */
+const discardAttempt = (session: Session, owner: InstanceHandle): void => {
+  forgetHandlers(session, owner)
+  for (const path of owner.children) {
+    const child = session.instances.get(path)
+    if (child === undefined) continue
+    child.node = undefined
+    discardAttempt(session, child)
+  }
+}
+
 /** A reused instance keeps its subtree: mark every nested instance as seen. */
 const markSeen = (ctx: RenderContext, owner: Owner): void => {
   for (const path of owner.children) {
@@ -253,8 +269,11 @@ const buildComponent = (
     const rendered = isBoundary(node.type)
       ? Effect.catchCause(body, (cause) =>
         Effect.gen(function*() {
-          // The subtree failed: render the fallback in its place. The
-          // boundary re-renders (and retries) when its subtree changes.
+          // The subtree failed: forget what the failed attempt registered and
+          // render the fallback in its place. The instances it reached are
+          // kept; the boundary re-renders (and retries) when its subtree
+          // changes.
+          discardAttempt(ctx.session, current)
           const fallback = (node.props as { readonly fallback: (cause: Cause.Cause<unknown>) => Child }).fallback(cause)
           const own = newBuilder()
           yield* renderChildren(ctx, own, fallback, path, false)

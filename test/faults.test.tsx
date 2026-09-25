@@ -74,6 +74,45 @@ describe("failure semantics", () => {
       assert.strictEqual(recovered, `<main><button data-lsc-click="r.0.0.0.0">1</button><i data-lsc-click="r.0.1.0">1</i></main>`)
     }))
 
+  it.effect("a failed boundary attempt forgets the handlers it registered, and a retry registers them again", () =>
+    Effect.gen(function*() {
+      const fired: Array<string> = []
+      const Ok = View.Component(function*() {
+        return <i onClick={() => Effect.sync(() => { fired.push("ok") })}>ok</i>
+      })
+      const Bad = View.Component(function*(p: { readonly explode: boolean }) {
+        const n = yield* View.State(0)
+        if (p.explode) return yield* Effect.die("boom")
+        return <b onClick={() => n.update((x) => x + 1)}>{n.value}</b>
+      })
+      const App = (p: { readonly explode: boolean }) => (
+        <View.ErrorBoundary fallback={() => <p>fallback</p>}>
+          <button onClick={() => Effect.sync(() => { fired.push("button") })}>x</button>
+          <Ok />
+          <Bad explode={p.explode} />
+        </View.ErrorBoundary>
+      )
+      const session = yield* makeSession()
+      yield* render(session, <App explode={false} />)
+      assert.deepStrictEqual([...session.handlers.keys()].sort(), ["click:r.0.0", "click:r.0.1.0", "click:r.0.2.0"])
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.2.0" })
+      assert.include(yield* render(session, <App explode={false} />), ">1</b>")
+      // Ok is memoized in the failed attempt; the button and Ok are no longer on the page
+      assert.strictEqual(yield* render(session, <App explode={true} />), "<p>fallback</p>")
+      assert.strictEqual(session.handlers.size, 0)
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.0" })
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.1.0" })
+      assert.deepStrictEqual(fired, [])
+      // the retry renders all three again, Bad's state intact, and their handlers work
+      assert.strictEqual(
+        yield* render(session, <App explode={false} />),
+        `<button data-lsc-click="r.0.0">x</button><i data-lsc-click="r.0.1.0">ok</i><b data-lsc-click="r.0.2.0">1</b>`
+      )
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.0" })
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.1.0" })
+      assert.deepStrictEqual(fired, ["button", "ok"])
+    }))
+
   it.effect("handler failures and defects are reported and the session goes on", () =>
     Effect.gen(function*() {
       const reported: Array<string> = []
