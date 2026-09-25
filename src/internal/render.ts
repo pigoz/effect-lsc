@@ -36,16 +36,23 @@ interface RenderContext {
   readonly removed: Array<readonly [path: string, instance: InstanceHandle]>
   /** The instance (or the session root) whose output is being built. */
   current: Owner
+  /** Handler changes, applied to the session's table when the render ends. */
+  readonly added: Map<string, Events.Handler<any>>
+  readonly dropped: Set<string>
 }
 
 const registerHandler = (ctx: RenderContext, key: string, handler: Events.Handler<any>): void => {
-  ctx.session.handlers.set(key, handler)
+  ctx.added.set(key, handler)
   ctx.current.handlerKeys.add(key)
 }
 
-/** Forgets the handlers an owner registered in its previous render. */
-const forgetHandlers = (session: Session, owner: Owner): void => {
-  for (const key of owner.handlerKeys) session.handlers.delete(key)
+/**
+ * Forgets the handlers an owner registered in its previous render. They
+ * stay in the session's table until the render ends, and a handler that
+ * another owner registers at the same key in this render replaces them.
+ */
+const forgetHandlers = (ctx: RenderContext, owner: Owner): void => {
+  for (const key of owner.handlerKeys) ctx.dropped.add(key)
   owner.handlerKeys.clear()
 }
 
@@ -60,14 +67,15 @@ const forgetHandlers = (session: Session, owner: Owner): void => {
  * in one of them must still reach the boundary above, which is clean after
  * rendering its fallback.
  */
-const discardAttempt = (session: Session, owner: InstanceHandle): void => {
-  forgetHandlers(session, owner)
+const discardAttempt = (ctx: RenderContext, owner: InstanceHandle): void => {
+  for (const key of owner.handlerKeys) ctx.added.delete(key)
+  forgetHandlers(ctx, owner)
   for (const path of owner.children) {
-    const child = session.instances.get(path)
+    const child = ctx.session.instances.get(path)
     if (child === undefined) continue
     child.node = undefined
     child.dirty = false
-    discardAttempt(session, child)
+    discardAttempt(ctx, child)
   }
 }
 
@@ -85,7 +93,7 @@ const markSeen = (ctx: RenderContext, owner: Owner): void => {
  * path is free for another. Its scope is closed at the end of the render.
  */
 const removeInstance = (ctx: RenderContext, path: string, instance: InstanceHandle): void => {
-  forgetHandlers(ctx.session, instance)
+  forgetHandlers(ctx, instance)
   ctx.session.instances.delete(path)
   ctx.removed.push([path, instance])
 }
@@ -296,7 +304,7 @@ const buildComponent = (
       markSeen(ctx, instance)
       return instance.node
     }
-    forgetHandlers(ctx.session, instance)
+    forgetHandlers(ctx, instance)
     instance.children.clear()
     instance.dirty = false
     instance.props = node.props
@@ -323,7 +331,7 @@ const buildComponent = (
         // changes. The fallback has paths of its own, so its components
         // never replace them. A failing recovery passes the failure to the
         // next boundary up.
-        discardAttempt(ctx.session, current)
+        discardAttempt(ctx, current)
         const recovered = recover(cause, node.props)
         const fallback: Child = Effect.isEffect(recovered) ? yield* (recovered as Effect.Effect<Child, unknown>) : recovered
         const own = newBuilder()
@@ -356,18 +364,38 @@ const buildComponent = (
 
 /**
  * Renders `child` for `session` into a wire node. Updates the session's
- * handler table and disposes component instances that left the tree.
+ * handler table when the render ends, failed or not, and disposes component
+ * instances that left the tree.
  */
 export const renderTree = (session: Session, child: Child): Effect.Effect<Node, unknown> =>
   Effect.gen(function*() {
-    forgetHandlers(session, session.root)
-    session.root.children.clear()
-    const ctx: RenderContext = { session, seen: new Set(), removed: [], current: session.root }
-    const root = newBuilder()
-    yield* renderChild(ctx, root, child, rootPath)
-    for (const [path, instance] of session.instances) {
-      if (!ctx.seen.has(path)) removeInstance(ctx, path, instance)
+    const ctx: RenderContext = {
+      session,
+      seen: new Set(),
+      removed: [],
+      current: session.root,
+      added: new Map(),
+      dropped: new Set()
     }
+    forgetHandlers(ctx, session.root)
+    session.root.children.clear()
+    const root = newBuilder()
+    // Events are handled on another fiber, and a render can wait (View.result)
+    // or yield. Until it ends, events find the handlers of the previous
+    // render, which match the page the browser has. Dropped keys go first,
+    // so a key that a removed owner shares with a new one keeps the new one.
+    const commit = Effect.sync(() => {
+      for (const key of ctx.dropped) session.handlers.delete(key)
+      for (const [key, handler] of ctx.added) session.handlers.set(key, handler)
+    })
+    yield* renderChild(ctx, root, child, rootPath).pipe(
+      Effect.andThen(Effect.sync(() => {
+        for (const [path, instance] of session.instances) {
+          if (!ctx.seen.has(path)) removeInstance(ctx, path, instance)
+        }
+      })),
+      Effect.ensuring(commit)
+    )
     // Deepest first: a descendant's path extends its ancestor's, and its
     // finalizers may still use what the ancestor provides (View.provide).
     // The page no longer has them, so a failing finalizer is only logged.

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Deferred, Effect, Queue, Scope, SubscriptionRef } from "effect"
+import { Deferred, Effect, Fiber, Queue, Scope, SubscriptionRef } from "effect"
 import { View } from "effect-lsc/view"
 import { render } from "../src/internal/render.ts"
 import { dispatch, makeSession, type Session } from "../src/internal/session.ts"
@@ -50,6 +50,76 @@ describe("session", () => {
       // the browser still shows the old DOM; its id maps to the new handler
       yield* click(session, first)
       assert.strictEqual(yield* render(session, <Toggle />), `<button data-lsc-click="r.0">off</button>`)
+    }))
+
+  it.effect("a button at the path of a removed component's button keeps its handler", () =>
+    Effect.gen(function*() {
+      const clicks: Array<string> = []
+      const Confirm = View.Component(function*() {
+        return <button onClick={() => { clicks.push("confirm") }}>Really?</button>
+      })
+      const Row = View.Component(function*() {
+        const asking = yield* View.State(false)
+        return (
+          <li>
+            {asking.value
+              ? <Confirm />
+              : <span><button onClick={() => { clicks.push("delete"); return asking.set(true) }}>Delete</button></span>}
+            <a onClick={() => asking.set(false)}>cancel</a>
+          </li>
+        )
+      })
+      const session = yield* makeSession()
+      yield* render(session, <Row />)
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.0.0" })
+      assert.strictEqual(
+        yield* render(session, <Row />),
+        `<li><button data-lsc-click="r.0.0.0">Really?</button><a data-lsc-click="r.0.1">cancel</a></li>`
+      )
+      // Confirm leaves at the end of the render, after Delete took its path
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.1" })
+      assert.strictEqual(
+        yield* render(session, <Row />),
+        `<li><span><button data-lsc-click="r.0.0.0">Delete</button></span><a data-lsc-click="r.0.1">cancel</a></li>`
+      )
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.0.0" })
+      assert.deepStrictEqual(clicks, ["delete", "delete"])
+    }))
+
+  it.effect("events during a render that waits find the handlers of the previous render", () =>
+    Effect.gen(function*() {
+      const waiting = yield* Deferred.make<void>()
+      const loaded = yield* Deferred.make<void>()
+      const clicks: Array<string> = []
+      const Pages = View.Component(function*() {
+        const page = yield* View.State(1)
+        const n = page.value
+        // a slow query for every page after the first, as with View.result
+        if (n > 1) {
+          yield* Deferred.succeed(waiting, undefined)
+          yield* Deferred.await(loaded)
+        }
+        return (
+          <main>
+            <p>page {n}</p>
+            <button onClick={() => { clicks.push("save") }}>save</button>
+            <button onClick={() => { clicks.push("next"); return page.update((x) => x + 1) }}>next</button>
+          </main>
+        )
+      })
+      const session = yield* makeSession()
+      yield* render(session, <Pages />)
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.2" })
+      const pending = yield* Effect.forkChild(render(session, <Pages />))
+      yield* Deferred.await(waiting)
+      // the browser still shows page 1, and its buttons still work
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.1" })
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.2" })
+      assert.deepStrictEqual(clicks, ["next", "save", "next"])
+      yield* Deferred.succeed(loaded, undefined)
+      assert.include(yield* Fiber.join(pending), "<p>page 2</p>")
+      // the click on next during the render left Pages dirty
+      assert.include(yield* render(session, <Pages />), "<p>page 3</p>")
     }))
 
   it.effect("keyed child components keep their own state when reordered", () =>

@@ -14,6 +14,7 @@
  * module wires them to a Durable Object.
  */
 import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
@@ -149,6 +150,7 @@ export const session = <E = never, R = never>(
     const session = yield* makeSession(true)
     const write = yield* socket.writer
     const inbox = yield* Queue.unbounded<ClientMessage>()
+    const rendered = yield* Deferred.make<void>()
     const describe = (scope: "handler" | "render", cause: Cause.Cause<unknown>) =>
       options?.debug ? Cause.pretty(cause) : `${scope} failed`
     const report = (scope: "handler" | "render") => (cause: Cause.Cause<unknown>) =>
@@ -167,7 +169,8 @@ export const session = <E = never, R = never>(
           Effect.andThen(report("render")(cause)),
           Effect.andThen(Effect.ignore(write(new Socket.CloseEvent(1011, "render failed"))))
         )
-      )
+      ),
+      Effect.ensuring(Deferred.succeed(rendered, undefined))
     )
 
     // The render loop: the first render when the socket opens, then one
@@ -175,9 +178,14 @@ export const session = <E = never, R = never>(
     // runs on this fiber, so a render that waits (View.result) is never
     // overlapped by the next.
     yield* Effect.forkScoped(Effect.forever(Effect.andThen(Queue.take(session.dirty), push)))
-    // Events are handled one at a time, in arrival order.
+    // Events are handled one at a time, in arrival order. Until the first
+    // render ends the session has no handlers, although the browser already
+    // shows the page, so events wait for it.
     yield* Effect.forkScoped(
-      Effect.forever(Effect.flatMap(Queue.take(inbox), (event) => dispatch(session, event, report("handler"))))
+      Effect.andThen(
+        Deferred.await(rendered),
+        Effect.forever(Effect.flatMap(Queue.take(inbox), (event) => dispatch(session, event, report("handler"))))
+      )
     )
     // The read loop owns the socket: on some platforms it completes the
     // handshake and only then accepts writes, so onOpen asks the render

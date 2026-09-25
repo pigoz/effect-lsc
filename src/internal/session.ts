@@ -22,7 +22,11 @@ export interface Session {
   readonly connected: boolean
   readonly dirty: Queue.Queue<void>
   readonly instances: Map<string, InstanceHandle>
-  /** Handlers by `event:path`, maintained incrementally by the renderer. */
+  /**
+   * Handlers by `event:path`, maintained incrementally by the renderer. A
+   * render applies its changes when it ends, so events handled meanwhile
+   * find the handlers of the previous render.
+   */
   readonly handlers: Map<string, Events.Handler<any>>
   /** Owner of elements and instances outside any component. */
   readonly root: Owner

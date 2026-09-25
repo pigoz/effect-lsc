@@ -403,8 +403,10 @@ Here `Titles` stands for an application service whose `find` fails with
 is `Initial`, and with `{ suspendOnWaiting: true }` while it refreshes.
 The atom's typed error becomes the component's, handled with
 [`View.catchTag`](#typed-errors) like any other. The whole session render
-waits with it, and so does the HTTP response. Use it for fast data, or
-for data the first page must contain.
+waits with it, and so does the HTTP response. Events that arrive during
+the first live render wait for it to end; during later renders they are
+handled meanwhile. Use it for fast data, or for data the first page must
+contain.
 
 The [search example](./examples/atom-search/App.tsx) combines these: the
 query is `View.State`, local to each tab, and the results are a family of
@@ -743,7 +745,9 @@ this coalescing is not a transaction around a whole handler.
 
 The render loop runs every render of the session, the first one included,
 one at a time. A render that waits, in `View.result` for instance, delays
-the next one. Changes that arrive meanwhile are rendered after it.
+the next one. Changes that arrive meanwhile are rendered after it. Events
+that arrive before the first render ends wait for it; later ones are
+handled while a render waits.
 
 ### Identity and component reuse
 
@@ -775,6 +779,14 @@ Event IDs are element paths, so an old event resolves against the current
 handler at that path. If no handler exists there, the event is ignored.
 There is no render-version check that rejects all events from an older
 DOM.
+
+A render swaps in its handlers when it ends, failed or not. Until then,
+events resolve against the handlers of the previous render, which match
+the page the browser has, even while the render waits or yields to other
+fibers. The first live render has no previous one, so events that arrive
+before it ends wait for it. The swap forgets the handlers of removed
+instances first, so an element that takes the path of a removed
+instance's element keeps its own handler.
 
 ### Render trees and wire patches
 
