@@ -119,4 +119,18 @@ describe("subtree morphing", () => {
       // Text's node changed but has no anchor: its ancestor <div> (the App node) is the target
       assert.deepStrictEqual(yield* apply(<App />), ["r.0"])
     }))
+
+  it.effect("a key with a dot gets an anchor of its own", () =>
+    Effect.gen(function*() {
+      const Star = View.Component(function*() {
+        return <button>*</button>
+      })
+      const App = () => <ul>{["1", "1.0"].map((v) => <li key={v}><Star /></li>)}</ul>
+      const browser = client()
+      const session = yield* makeSession()
+      const { tree } = browser.apply(null, yield* step(session, <App />))
+      const anchors = [...browser.html(tree, "r").matchAll(/data-lsc-n="([^"]+)"/g)].map((m) => m[1])
+      // unescaped, the Star of "1" and the item "1.0" would both be r.0.0.k1.0
+      assert.deepStrictEqual(anchors, ["r.0", "r.0.0.k1", "r.0.0.k1.0", "r.0.0.k1%2E0", "r.0.0.k1%2E0.0"])
+    }))
 })

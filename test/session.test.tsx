@@ -139,6 +139,38 @@ describe("session", () => {
       assert.strictEqual(second, `<ul><li data-lsc-click="r.0.kb.0">b:1</li><li data-lsc-click="r.0.ka.0">a:0</li></ul>`)
     }))
 
+  it.effect("a key with a dot never shares a path with a nested position", () =>
+    Effect.gen(function*() {
+      const Stars = View.Component(function*(props: { readonly v: string }) {
+        const n = yield* View.State(0)
+        return <button onClick={() => n.update((x) => x + 1)}>{props.v}:{n.value}</button>
+      })
+      const Release = View.Component(function*(props: { readonly v: string }) {
+        return <Stars v={props.v} />
+      })
+      const List = (props: { readonly versions: ReadonlyArray<string> }) => (
+        <ul>{props.versions.map((v) => <Release key={v} v={v} />)}</ul>
+      )
+      const session = yield* makeSession()
+      // without escaping, the Stars of "1" and the Release "1.0" are both at r.0.k1.0
+      const first = yield* render(session, <List versions={["1", "1.0"]} />)
+      assert.strictEqual(
+        first,
+        `<ul><button data-lsc-click="r.0.k1.0.0">1:0</button><button data-lsc-click="r.0.k1%2E0.0.0">1.0:0</button></ul>`
+      )
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.k1.0.0" })
+      const second = yield* render(session, <List versions={["1", "1.0"]} />)
+      assert.strictEqual(
+        second,
+        `<ul><button data-lsc-click="r.0.k1.0.0">1:1</button><button data-lsc-click="r.0.k1%2E0.0.0">1.0:0</button></ul>`
+      )
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.k1%2E0.0.0" })
+      assert.strictEqual(
+        yield* render(session, <List versions={["1", "1.0"]} />),
+        `<ul><button data-lsc-click="r.0.k1.0.0">1:1</button><button data-lsc-click="r.0.k1%2E0.0.0">1.0:1</button></ul>`
+      )
+    }))
+
   it.effect("instances that leave the tree are closed", () =>
     Effect.gen(function*() {
       const closed = yield* Deferred.make<void>()

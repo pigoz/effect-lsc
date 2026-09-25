@@ -2,8 +2,9 @@
  * Renders a `Child` tree into a wire `Node` for a session.
  *
  * Every node has a path (`r.0.2.k42.1`): array indices, `k<key>` for keyed
- * children, and `f` before the fallback of a boundary. Paths are stable
- * across renders for the same tree position, and are used for two things:
+ * children (with `%` and `.` in the key escaped), and `f` before the
+ * fallback of a boundary. Paths are stable across renders for the same tree
+ * position, and are used for two things:
  *
  * - component instances live at their path, so `View.State` persists
  * - event handlers are registered under their element path, which is what
@@ -140,7 +141,15 @@ const childPath = (path: string, index: number, key: string | undefined) =>
 /** Where a boundary renders its fallback: beside its children, never at their paths. */
 const fallbackPath = (path: string) => `${path}.f`
 
-const keyOf = (child: Child): string | undefined => isVNode(child) && child._tag !== "Raw" ? child.key : undefined
+/**
+ * A child's key as it appears in paths and list keys. `%` and `.` are
+ * escaped, so a key never contains the separator: `"1.0"` is `1%2E0`, and
+ * cannot collide with the nested position `1` then `0`.
+ */
+const keyOf = (child: Child): string | undefined => {
+  if (!isVNode(child) || child._tag === "Raw" || child.key === undefined) return undefined
+  return child.key.replaceAll("%", "%25").replaceAll(".", "%2E")
+}
 
 /**
  * Renders the children of a node at `path`. A single child gets index 0, so
