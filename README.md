@@ -149,6 +149,9 @@ bun run smoke         # install the packed package and render with Bun and Node
 bun run runtime       # regenerate the browser runtime and vendored idiomorph
 ```
 
+Type tests live in `test/types/*.tsx`. `bun run check` compiles them, and
+each `@ts-expect-error` in them must hide a real error.
+
 Browser tests use Playwright's Chromium (`bunx playwright install chromium`)
 or an installed Google Chrome. They check DOM updates, element identity,
 focus, form input, islands and error handling. CI runs the suites with both

@@ -60,6 +60,17 @@ export const ErrorBoundary: (props: {
   readonly children?: Child
 }) => Child = Object.assign((props: { readonly children?: Child }) => props.children, { [BoundaryTypeId]: BoundaryTypeId })
 
+// -----------------------------------------------------------------------------
+// Components
+// -----------------------------------------------------------------------------
+
+/**
+ * The call signature of a component. `(...args: []) => A` would let JSX
+ * accept any attribute on a component without props; `() => A` keeps the
+ * excess-attribute check.
+ */
+type Signature<Args extends [props?: any], A> = [Args] extends [[]] ? () => A : (...args: Args) => A
+
 /**
  * Defines a component from a generator body. The body runs when the
  * component renders and may `yield*` any Effect, including `View.State`.
@@ -77,7 +88,7 @@ export const Component = <
   A extends Child
 >(
   body: (...args: Args) => Generator<Eff, A, never>
-): (...args: Args) => Effect.Effect<A, Effect.Error<Eff>, Effect.Services<Eff>> => Effect.fnUntraced(body) as any
+): Signature<Args, Effect.Effect<A, Effect.Error<Eff>, Effect.Services<Eff>>> => Effect.fnUntraced(body) as any
 
 // -----------------------------------------------------------------------------
 // Local state

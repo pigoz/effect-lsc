@@ -32,6 +32,10 @@ such as `class` and `for`. `class` accepts an array with falsy entries, and
 `style` accepts an object. Use `key` on dynamic list items to preserve their
 component identity when items are inserted, removed or moved.
 
+`View.Component` does not keep the type parameters of a generic body. Write
+a generic component as a plain function; it can return `Effect.gen(...)` to
+use `View.State`.
+
 A component runs on its first render, when its state or watched sources
 change, when a descendant changes, or when its props differ. Otherwise the
 renderer reuses its previous output. Derived values can be computed in the
