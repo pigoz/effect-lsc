@@ -32,6 +32,8 @@ import { fingerprint, makeList, toHtml } from "./wire.ts"
 interface RenderContext {
   readonly session: Session
   readonly seen: Set<string>
+  /** Instances taken off the session during this render, closed at its end. */
+  readonly removed: Array<readonly [path: string, instance: InstanceHandle]>
   /** The instance (or the session root) whose output is being built. */
   current: Owner
 }
@@ -78,10 +80,14 @@ const markSeen = (ctx: RenderContext, owner: Owner): void => {
   }
 }
 
-const closeInstance = (session: Session, path: string, instance: InstanceHandle): Effect.Effect<void> => {
-  forgetHandlers(session, instance)
-  session.instances.delete(path)
-  return instance.close
+/**
+ * Takes an instance off the session: its handlers are forgotten and its
+ * path is free for another. Its scope is closed at the end of the render.
+ */
+const removeInstance = (ctx: RenderContext, path: string, instance: InstanceHandle): void => {
+  forgetHandlers(ctx.session, instance)
+  ctx.session.instances.delete(path)
+  ctx.removed.push([path, instance])
 }
 
 interface Builder {
@@ -257,7 +263,7 @@ const buildComponent = (
     let instance = ctx.session.instances.get(path)
     if (instance !== undefined && instance.type !== node.type) {
       yield* warnRemount(instance.type, node.type, path)
-      yield* closeInstance(ctx.session, path, instance)
+      removeInstance(ctx, path, instance)
       instance = undefined
     }
     if (instance === undefined) {
@@ -292,7 +298,7 @@ const buildComponent = (
       return finish(own, isElement(output))
     })
     const recover = boundary?.recover
-    const rendered = recover === undefined ? body : Effect.catchCause(body, (cause) =>
+    const guarded = recover === undefined ? body : Effect.catchCause(body, (cause) =>
       Effect.gen(function*() {
         // The subtree failed: forget what the failed attempt registered and
         // render the fallback in its place. The instances it reached are
@@ -307,6 +313,11 @@ const buildComponent = (
         yield* renderChildren(ctx, own, fallback, fallbackPath(path), false)
         return finish(own, isElement(fallback))
       }))
+    // `wrap` runs the whole render, recovery included, with the boundary's
+    // Instance, so its slots are the boundary's and what it provides
+    // (View.provide) reaches the whole subtree.
+    const wrap = boundary?.wrap
+    const rendered = wrap === undefined ? guarded : Effect.provideService(wrap(guarded, node.props), Instance, current)
     return yield* rendered.pipe(
       Effect.tapCause(() =>
         Effect.sync(() => {
@@ -334,13 +345,25 @@ export const renderTree = (session: Session, child: Child): Effect.Effect<Node, 
   Effect.gen(function*() {
     forgetHandlers(session, session.root)
     session.root.children.clear()
-    const ctx: RenderContext = { session, seen: new Set(), current: session.root }
+    const ctx: RenderContext = { session, seen: new Set(), removed: [], current: session.root }
     const root = newBuilder()
     yield* renderChild(ctx, root, child, rootPath)
     for (const [path, instance] of session.instances) {
-      if (ctx.seen.has(path)) continue
-      yield* closeInstance(session, path, instance)
+      if (!ctx.seen.has(path)) removeInstance(ctx, path, instance)
     }
+    // Deepest first: a descendant's path extends its ancestor's, and its
+    // finalizers may still use what the ancestor provides (View.provide).
+    // The page no longer has them, so a failing finalizer is only logged.
+    ctx.removed.sort((a, b) => b[0].length - a[0].length)
+    yield* Effect.forEach(
+      ctx.removed,
+      ([path, instance]) =>
+        Effect.catchCause(
+          instance.close,
+          (cause) => Effect.logError(`effect-lsc: a finalizer of the component at ${path} failed`, cause)
+        ),
+      { discard: true }
+    )
     return finish(root, false)
   })
 

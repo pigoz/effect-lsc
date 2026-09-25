@@ -138,11 +138,14 @@ export type Recover = (cause: Cause.Cause<unknown>, props: any) => Child | Effec
  * What the renderer runs for a boundary component. `render` is the body,
  * whose output the renderer renders. When that render (body and subtree)
  * fails, what `recover` returns is rendered in its place; a boundary
- * without `recover` lets the failure through.
+ * without `recover` lets the failure through. When present, `wrap` runs
+ * the whole render, recovery included, with the boundary's `Instance`
+ * (`View.provide`).
  */
 export interface Boundary {
   readonly render: (props: any) => Child | Effect.Effect<Child, unknown, unknown>
   readonly recover?: Recover | undefined
+  readonly wrap?: (<A>(render: Effect.Effect<A, unknown>, props: any) => Effect.Effect<A, unknown, Instance>) | undefined
 }
 
 export const boundaryOf = (type: unknown): Boundary => (type as { readonly [BoundaryTypeId]: Boundary })[BoundaryTypeId]

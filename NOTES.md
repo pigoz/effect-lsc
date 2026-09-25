@@ -52,9 +52,13 @@ parameter changes and server-initiated navigation.
 
 ### Session services and derived state
 
-A per-session layer could provide resources such as the current user and
-release them with the socket. Shared services already cover application
-state; the missing piece is an explicit session-layer API.
+Session services are settled. A service that depends on the request, such
+as the current user, comes from `HttpRouter` middleware, which runs for the
+HTTP render and for the WebSocket upgrade. A service for one session, or
+one subtree, comes from `View.provide`: its layer is built once per
+instance and released with it. A layer that fails to build stays failed
+until the component remounts; whether to retry it on a later render is
+open.
 
 Derived values currently use ordinary computation inside a component.
 For expensive derivations or external notifications, consider watching a

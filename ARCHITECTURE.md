@@ -164,7 +164,8 @@ not compile, and `Effect.provideService(Members(props), Users, users)`
 still requires `Subtree<UserNotFound, Users>`: neither would reach the
 rows, which render after the body. `View.use` itself requires the
 `Subtree` it records, so `Effect.runSync(View.use(Member))` does not
-compile either.
+compile either. Provide services to the rows with `View.provide` instead;
+see [services for a subtree](#services-for-a-subtree).
 
 Handle a typed error in the body that raises it, or with `View.catchTag`
 where the component is defined; see [typed errors](#typed-errors). At
@@ -234,12 +235,63 @@ amounts to a cast. An overloaded component is checked against one of its
 overloads only, so give a component with services or typed errors a
 single signature. Handler errors and defects are not typed.
 
+### Services for a subtree
+
+`View.provide` provides a layer to a component and every component it
+renders. At the root, it gives each tab its own services:
+
+```tsx
+type Items = ReadonlyArray<string>
+
+class Cart extends Context.Service<Cart, View.SharedState<Items>>()("app/Cart") {
+  static readonly layer = Layer.effect(Cart, View.SharedState<Items>([]))
+}
+
+// Every component in App's tree that needs Cart gets this tab's cart.
+const Shop = View.provide(App, Cart.layer)
+const Routes = Server.mount("/", Shop)
+```
+
+The layer is built on the component's first render, in its instance
+scope, and released when the component leaves the page or the session
+closes, after the components below it. Later renders reuse it. Each
+instance builds its own copy, even of a layer that the application or an
+enclosing `View.provide` has already built. At the root, the HTTP render
+and the live session each build it, so it is built twice per page load;
+see [component lifetime](#component-lifetime-and-rendering-helpers). A
+service that depends on the request, such as the current user, comes from
+router middleware instead; see [what a root accepts](#what-a-root-accepts).
+
+The layer is built outside the component instance, so a layer that uses
+`View.State`, `View.watch` or `View.once` is a type error. Keep its state
+in a `View.SharedState`, as `Cart` does.
+
+The result no longer needs what the layer provides, in its body or its
+`Subtree`. What the layer requires, and its error, are added to the
+`Subtree`. A layer that fails to build fails the render, up to the next
+boundary. The failure is kept: the layer is built again only when the
+component remounts.
+
+`View.provide` is a render boundary, like [`View.catchTag`](#typed-errors):
+it is the instance of the component it wraps, at the same path. It also
+takes the layer alone, for `pipe`: `App.pipe(View.provide(Cart.layer))`.
+Define it at module level: created in a body, it remounts and builds its
+layer again on every render, and the renderer logs a warning.
+
+**Never `Effect.provide(layer)` a component**, as in
+`Effect.provide(Members(props), layer)`. The layer would cover the body
+alone: it would be built on every render and released as soon as the body
+returns, before the handlers that captured its services run. The children
+render after the body, so they would not get the services, and the
+`Subtree` keeps requiring them.
+
 ### Component lifetime and rendering helpers
 
 | API | Purpose |
 | --- | --- |
 | `View.once(effect)` | Run an Effect once per component instance in its scope, returning the same result on later renders. |
 | `View.connected` | Read whether this is a live WebSocket session (`true`) or the initial HTTP render (`false`). |
+| `View.provide(Component, layer)` | Provide a layer to a component and its subtree, built once per instance; see [services for a subtree](#services-for-a-subtree). |
 | `View.ErrorBoundary` | Render a fallback when a child fails to render; see [errors and reconnects](#errors-and-reconnects). |
 | `View.render(jsx)` | Render to an HTML string in a temporary, disconnected session. Useful in tests; it does not start a live connection. |
 | `View.render(Component, props)` | Render a component the same way. The Effect fails with the tree's typed errors and needs its services. |
@@ -382,10 +434,11 @@ component from `View.use` rendered elsewhere; see
 [services and typed errors](#services-and-typed-errors-across-components).
 The server logs the render failure with a hint.
 
-The root requires every service the tree uses. `Server.page` and
-`Server.session` return Effects that require them. `Server.mount` returns a
-Layer that requires them from the router, like any route, so a service that
-no layer provides is reported where the application is launched, at the
+The root requires every service the tree uses, except those
+`View.provide` provides to a subtree. `Server.page` and `Server.session`
+return Effects that require them. `Server.mount` returns a Layer that
+requires them from the router, like any route, so a service that no layer
+provides is reported where the application is launched, at the
 `Layer.launch` step, not at `mount`. `Cloudflare.app` checks its `layer`
 against the tree instead and names the services it lacks. That layer may
 not have requirements of its own.
@@ -414,7 +467,9 @@ const Authentication = HttpRouter.middleware<{ provides: CurrentUser }>()(
 const Routes = Server.mount("/", App).pipe(Layer.provide(Authentication.layer))
 ```
 
-The cookie stands in for real authentication.
+The cookie stands in for real authentication. A service for each session
+rather than each request is provided at the root with `View.provide`; see
+[services for a subtree](#services-for-a-subtree).
 
 ## Errors and reconnects
 
@@ -573,10 +628,14 @@ Recreating every item object defeats this reuse. Newly constructed JSX in
 `children` can also cause props to differ.
 
 Re-rendered instances replace their handlers; reused instances keep theirs;
-removed instances release their scope and handlers. Event IDs are element
-paths, so an old event resolves against the current handler at that path.
-If no handler exists there, the event is ignored. There is no render-version
-check that rejects all events from an older DOM.
+removed instances release their scope and handlers, descendants before
+ancestors. They close at the end of the render, so a component that
+replaces another renders before the old one's finalizers run. A finalizer
+that fails is logged and does not fail the render.
+Event IDs are element paths, so an old event resolves against the current
+handler at that path. If no handler exists there, the event is ignored.
+There is no render-version check that rejects all events from an older
+DOM.
 
 ### Render trees and wire patches
 
@@ -616,7 +675,7 @@ leave the page.
 | [view.ts](./src/internal/view.ts) | Public component helpers, local and shared state, subscriptions |
 | [instance.ts](./src/internal/instance.ts) | Instance scopes, slots and invalidation |
 | [session.ts](./src/internal/session.ts) | Instance and handler registries, event dispatch |
-| [vnode.ts](./src/internal/vnode.ts) | JSX nodes and factory, how boundaries render and recover |
+| [vnode.ts](./src/internal/vnode.ts) | JSX nodes and factory, how boundaries render, recover and wrap their subtree |
 | [render.ts](./src/internal/render.ts) | JSX traversal and component reuse |
 | [wire.ts](./src/internal/wire.ts) | Render tree representation and diffs |
 | [protocol.ts](./src/internal/protocol.ts) | Message schemas and encoding |

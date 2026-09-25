@@ -7,14 +7,18 @@
  * - `View.SharedState` creates state shared by components and sessions
  * - `View.watch` makes a component re-render when a state changes
  * - `View.catchTag`, `View.catchTags`, `View.orDie` handle typed render errors
+ * - `View.provide` provides a layer to a component and its subtree
  * - `View.render` renders a tree to HTML once (handy for tests)
  *
  * Components run on the server and re-run when their state changes; the
  * resulting patches are merged into the page by the browser runtime.
  */
 import * as Cause from "effect/Cause"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import { dual, identity } from "effect/Function"
+import * as Layer from "effect/Layer"
 import { type Pipeable, pipeArguments } from "effect/Pipeable"
 import * as Result from "effect/Result"
 import type * as Scope from "effect/Scope"
@@ -356,9 +360,10 @@ declare const SubtreeTypeId: unique symbol
  * parent's body has returned, so `Effect.catchTag` or `Effect.provide`
  * around the parent cannot handle them, and the types must not pretend
  * they do. Only render boundaries (`View.catchTag` and friends) remove
- * its errors. The root reads it back: `View.render` fails with its errors
- * and needs its services, `Server.mount`, `Server.page`, `Server.session`
- * and `Cloudflare.app` need its services and reject its errors.
+ * its errors, and only `View.provide` provides its services. The root
+ * reads it back: `View.render` fails with its errors and needs its
+ * services, `Server.mount`, `Server.page`, `Server.session` and
+ * `Cloudflare.app` need its services and reject its errors.
  */
 export interface Subtree<out E, out R> {
   readonly [SubtreeTypeId]: { readonly E: () => E; readonly R: () => R }
@@ -549,6 +554,55 @@ export const orDie = <Args extends [props?: any], E, R>(
         Cause.fromReasons(cause.reasons.map((reason) => Cause.isFailReason(reason) ? Cause.makeDieReason(reason.error) : reason))
       )
   })
+
+/**
+ * Rejects layers that need `Instance`, such as one built with `View.State`:
+ * the layer is built outside the instance, whose slots belong to the
+ * component. The layer keeps its state in a `View.SharedState` instead.
+ */
+type NoInstanceIn<RIn> = [Extract<RIn, Instance>] extends [never] ? unknown
+  : { readonly "effect-lsc: a View.provide layer runs outside the instance; use View.SharedState instead of View.State": never }
+
+/**
+ * Provides `layer` to `component` and its whole subtree. Each instance
+ * builds its own copy, on its first render and in its instance scope, even
+ * when the application or an enclosing `View.provide` has built the same
+ * layer. The copy is released when the component leaves the page or the
+ * session ends, after the components below it. At the root, that is one
+ * build per page render and one per live session:
+ *
+ * ```ts
+ * Server.mount("/", View.provide(App, TabCache.layer))
+ * ```
+ *
+ * The result no longer needs what the layer provides; it needs what the
+ * layer requires and can fail with its error, in its `Subtree`. A layer
+ * that fails to build fails the render, up to the next boundary, and is
+ * not rebuilt until the component remounts. Define it at module level.
+ */
+export const provide: {
+  <ROut, E2, RIn>(
+    layer: Layer.Layer<ROut, E2, RIn> & NoInstanceIn<RIn>
+  ): <Args extends [props?: any], E, R>(
+    component: (...args: Args) => Child | Effect.Effect<Child, E, R>
+  ) => Bounded<Args, Errors<E, R> | Errors<E2, RIn>, Exclude<Services<R>, ROut> | RIn>
+  <Args extends [props?: any], E, R, ROut, E2, RIn>(
+    component: (...args: Args) => Child | Effect.Effect<Child, E, R>,
+    layer: Layer.Layer<ROut, E2, RIn> & NoInstanceIn<RIn>
+  ): Bounded<Args, Errors<E, R> | Errors<E2, RIn>, Exclude<Services<R>, ROut> | RIn>
+} = dual(2, (component: any, layer: Layer.Layer<any, any, any>) =>
+  boundary(component, {
+    // `Layer.fresh`: `Layer.build` would reuse a build of the same layer
+    // from the memo map of the application or of an enclosing View.provide.
+    // Built without Instance, so a cast layer cannot take the component's
+    // slots. The build's exit is kept in a slot: a failed build fails every
+    // render until the instance remounts.
+    wrap: (render) =>
+      Effect.flatMap(
+        once(Effect.exit(Effect.updateContext(Layer.build(Layer.fresh(layer)), Context.omit(Instance)))),
+        (built) => Exit.isSuccess(built) ? Effect.provideContext(render, built.value) : Effect.failCause(built.cause)
+      )
+  }))
 
 /**
  * Renders a tree, or a component with its props, to an HTML string with a

@@ -40,4 +40,8 @@ describe("type error messages", () => {
     assert.isTrue(at(26))
     assert.include(output, "effect-lsc: this component requires Scope; acquire resources with View.once")
   })
+  it("a View.provide layer using View.State says to use View.SharedState", () => {
+    assert.isTrue(at(27))
+    assert.include(output, "effect-lsc: a View.provide layer runs outside the instance; use View.SharedState instead of View.State")
+  })
 })

@@ -24,3 +24,4 @@ export const stateful = View.catchTag(Missing, "NotFound", () => Effect.map(View
 export const unhandled = Server.mount("/", () => Missing({ id: "1" }))
 export const missing = Cloudflare.app(Name, { layer: Layer.empty })
 export const rootScope = Server.mount("/", Leaky)
+export const statefulLayer = View.provide(Name, Layer.effect(Db, Effect.map(View.State("tab"), (name) => ({ name: name.value }))))

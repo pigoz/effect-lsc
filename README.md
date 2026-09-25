@@ -112,7 +112,9 @@ const TodoList = View.Component(function*() {
 
 `use` adds the child's services and typed errors, and those of its own
 children, to the parent's type, so `Server.mount` requires every service
-the tree uses. Handle typed errors where the component is defined:
+the tree uses. `View.provide(App, layer)` provides a layer to a component
+and its subtree instead, such as services for each tab. Handle typed errors
+where the component is defined:
 
 ```tsx
 const Member = View.Component(function*(props: { readonly id: string }) {
