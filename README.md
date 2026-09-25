@@ -5,7 +5,7 @@ Phoenix LiveView, built on [Effect](https://effect.website) v4 and plain JSX.
 
 - components execute on the server, as Effects
 - the services and typed errors of child components appear in the parent's type
-- state lives on the server
+- state lives on the server, and components can also watch Effect atoms
 - JSX describes the UI; event callbacks stay on the server
 - the browser runs one small, generic runtime (17.1 KB inlined, 6.2 KB gzipped),
   including [idiomorph](https://github.com/bigskysoftware/idiomorph) (9.7 KB minified before bundling)
@@ -97,9 +97,9 @@ alongside a count local to each tab.
 ## Services and typed errors
 
 A component used as a JSX tag must not need services or fail with typed
-errors; the `View` helpers such as `View.State` do not count. A component
-that does is brought into its parent with `View.use`, which returns it as a
-closed component:
+errors. `View.State` and the other `View` helpers do not count, but
+watching an atom needs `AtomRegistry`. Any other component is brought
+into its parent with `View.use`, which returns it as a closed component:
 
 ```tsx
 const TodoList = View.Component(function*() {
@@ -128,6 +128,33 @@ The boundary also covers the components `Member` uses, and `Server.mount`
 rejects a tree with a typed error left unhandled. See
 [services and typed errors](./ARCHITECTURE.md#services-and-typed-errors-across-components)
 and [typed errors](./ARCHITECTURE.md#typed-errors).
+
+## Shared state with atoms
+
+Components can also watch Effect atoms from `effect/unstable/reactivity`.
+Atoms live in the `AtomRegistry` service: provide one registry to the
+server, and every tab shares its atoms.
+
+```tsx
+import { Atom, AtomRegistry } from "effect/unstable/reactivity"
+
+const count = Atom.make(0).pipe(Atom.keepAlive)
+
+const Counter = View.Component(function*() {
+  const registry = yield* AtomRegistry.AtomRegistry
+  const total = yield* View.watch(count)
+  return <button onClick={() => registry.update(count, (n) => n + 1)}>{total}</button>
+})
+
+const App = Server.mount("/", Counter, { title: "Atom counter" })
+// HttpRouter.serve(App).pipe(Layer.provide(AtomRegistry.layer), ...)
+```
+
+Handlers write through the registry taken in the body. A component that
+watches atoms needs `AtomRegistry`, so its parent brings it in with
+`View.use`. An async atom gives an `AsyncResult` to render, or
+`View.result` waits for its value. See [atoms](./ARCHITECTURE.md#atoms)
+for lifetimes and pitfalls.
 
 ## Running the examples
 
@@ -217,5 +244,7 @@ The main limitations are:
   timeouts, session caps or application-level backpressure controls.
 - **No Cloudflare WebSocket hibernation.** Live sessions stay in memory and
   keep their Durable Object awake while connected.
+- **Atoms are experimental.** They are built on `effect/unstable/reactivity`,
+  which may change in any Effect release.
 
 Planned work and unresolved design choices are tracked in [NOTES.md](./NOTES.md).

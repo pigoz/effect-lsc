@@ -34,7 +34,8 @@ Exercise 100, 500 and 1000 sessions before adding navigation. Include
 simultaneous tickers, bursts of events and repeated connect/disconnect
 cycles. Measure latency and memory after scopes close and garbage
 collection runs. A raw-socket driver under `scripts/` would make these
-workloads repeatable.
+workloads repeatable. Include sessions watching atoms, and measure whether
+the atom registry needs a `scheduleTask` other than its default.
 
 ## 3. UI primitives
 
@@ -60,10 +61,32 @@ instance and released with it. A layer that fails to build stays failed
 until the component remounts; whether to retry it on a later render is
 open.
 
-Derived values currently use ordinary computation inside a component.
-For expensive derivations or external notifications, consider watching a
-stream with an initial value, derived refs, or an Effect atom integration.
-Choose an approach when an example demonstrates the need.
+Derived values use ordinary computation inside a component, or derived
+Effect atoms; see [atoms](./ARCHITECTURE.md#atoms).
+
+### Atoms
+
+The atom integration leaves these open:
+
+- **Shared services:** `Atom.runtime(layer)` builds its own instances of
+  services the application has already built. `Atom.context({ memoMap })`
+  with the application's memo map could share them.
+- **Persistence:** `Atom.kvs` on Durable Object storage, so that shared
+  atoms survive a restart of their object.
+- **Islands:** start browser-side atoms in an island from the server's
+  values, with `Hydration` and `Atom.serializable`.
+- **Ambient registry:** the renderer could provide a default registry, so
+  that a component that only watches atoms needs no `View.use`. Revisit if
+  those `use` lines become annoying.
+- **`AtomRef`:** `View.watch` does not accept one. Atoms and
+  `SubscriptionRef` cover its uses for now.
+- **Synchronous listeners for `SharedState`:** a watch of a `SharedState`
+  runs a fiber that follows its changes. A synchronous listener, as atoms
+  use, would need no fiber.
+- **A redundant render after `View.result`:** the value that ends the wait
+  also notifies the waiting component, so the session renders it once
+  more for nothing. Muting the slot's listener while it waits would avoid
+  that.
 
 ### Serializable state
 

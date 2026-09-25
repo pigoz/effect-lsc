@@ -283,7 +283,10 @@ const buildComponent = (
     if (instance === undefined) {
       const scope = yield* Scope.fork(ctx.session.scope)
       const parent = ctx.current === ctx.session.root ? undefined : ctx.current as InstanceHandle
-      const wake = Effect.asVoid(Queue.offer(ctx.session.dirty, undefined))
+      const dirty = ctx.session.dirty
+      const wake = () => {
+        Queue.offerUnsafe(dirty, undefined)
+      }
       instance = makeInstance(node.type, scope, parent, ctx.session.connected, wake)
       ctx.session.instances.set(path, instance)
     }

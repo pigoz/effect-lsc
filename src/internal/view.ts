@@ -5,7 +5,8 @@
  * - `View.use` brings a component with services or typed errors into a parent
  * - `View.State` creates component-local state that survives re-renders
  * - `View.SharedState` creates state shared by components and sessions
- * - `View.watch` makes a component re-render when a state changes
+ * - `View.watch` makes a component re-render when a state or an atom changes
+ * - `View.result` waits for the value of an async atom
  * - `View.catchTag`, `View.catchTags`, `View.orDie` handle typed render errors
  * - `View.provide` provides a layer to a component and its subtree
  * - `View.render` renders a tree to HTML once (handy for tests)
@@ -26,6 +27,10 @@ import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Types from "effect/Types"
+import type * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import type * as Atom from "effect/unstable/reactivity/Atom"
+import type * as AtomRegistry from "effect/unstable/reactivity/AtomRegistry"
+import { isAtom, result as result_, watchAtom } from "./atom.ts"
 import { follow, Instance } from "./instance.ts"
 import { render as render_ } from "./render.ts"
 import { makeSession } from "./session.ts"
@@ -282,7 +287,8 @@ export const SharedState = <A>(initial: A): Effect.Effect<SharedState<A>> =>
 
 /**
  * What a component can watch: its own or another component's `State`, a
- * `SharedState`, or, as an escape hatch, any `SubscriptionRef`.
+ * `SharedState`, or, as an escape hatch, any `SubscriptionRef`. Atoms are
+ * watched too, see `watch`.
  */
 export type Watchable<A> = State<A> | SharedState<A> | SubscriptionRef.SubscriptionRef<A>
 
@@ -311,17 +317,43 @@ const read = <A>(source: Watchable<A>): A =>
     : SubscriptionRef.getUnsafe(source as SubscriptionRef.SubscriptionRef<A>)
 
 /**
- * Reads a state and re-renders the component whenever it changes. This is
- * how a component depends on state it does not own: a `SharedState` from a
- * service, or a `State` handle received from a parent.
+ * Reads a state or an atom and re-renders the component whenever it
+ * changes. This is how a component depends on state it does not own: a
+ * `SharedState` from a service, a `State` handle received from a parent, or
+ * an Effect atom (`effect/unstable/reactivity`).
  *
  * Each call is a slot, like `View.State`. When a later render passes a
- * different source at the same position (a new handle in the props), the
- * slot follows it: it subscribes to the new source and releases the old one.
+ * different source at the same position (a new handle in the props,
+ * `Atom.family(props.id)` with a new id), the slot follows it: it
+ * subscribes to the new source and releases the old one.
+ *
+ * Atoms are read from the `AtomRegistry` service, which the application
+ * provides once (`AtomRegistry.layer`), so every session shares them
+ * unless a subtree provides its own. An async atom is an `AsyncResult`:
+ * render it with `AsyncResult.builder`, or use `View.result` to wait for it.
  */
-export const watch = <A>(source: Watchable<A>): Effect.Effect<A, never, Instance> =>
-  Effect.flatMap(Instance, (instance) =>
-    Effect.map(follow(instance, [source], subscribe(source, instance)), () => read(source)))
+export const watch: {
+  <A>(atom: Atom.Atom<A>): Effect.Effect<A, never, Instance | AtomRegistry.AtomRegistry>
+  <A>(source: Watchable<A>): Effect.Effect<A, never, Instance>
+} = <A>(source: Watchable<A> | Atom.Atom<A>): Effect.Effect<A, never, any> =>
+  isAtom(source)
+    ? watchAtom(source)
+    : Effect.flatMap(Instance, (instance) =>
+      Effect.map(follow(instance, [source], subscribe(source, instance)), () => read(source)))
+
+/**
+ * Watches an async atom and returns its value once it has one: the render
+ * waits while the atom is `Initial` (and, with `suspendOnWaiting`, while it
+ * is refreshing), and the atom's typed error becomes the component's, to be
+ * handled with `View.catchTag`. The whole session render waits with it, so
+ * use it for fast data or data the first page must contain; otherwise
+ * `watch` the `AsyncResult` and render its states. Each call is a slot,
+ * like `View.watch`.
+ */
+export const result: <A, E>(
+  atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>,
+  options?: { readonly suspendOnWaiting?: boolean | undefined }
+) => Effect.Effect<A, E, Instance | AtomRegistry.AtomRegistry> = result_
 
 /**
  * Runs `effect` once per component instance, on its first render, in the

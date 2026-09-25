@@ -30,6 +30,13 @@ export interface InstanceShape {
   readonly slot: <A>(create: Effect.Effect<A, never, Scope.Scope>) => Effect.Effect<A>
   /** Marks the instance and its ancestors for re-render and wakes the session. */
   readonly invalidate: Effect.Effect<void>
+  /**
+   * `invalidate` as a plain callback, for synchronous listeners such as atom
+   * subscriptions, which run inside whoever wrote the atom (possibly another
+   * session's handler). It only sets flags and offers to a sliding queue, so
+   * it never throws and never blocks.
+   */
+  readonly invalidateUnsafe: () => void
 }
 
 export class Instance extends Context.Service<Instance, InstanceShape>()("effect-lsc/View/Instance") {}
@@ -62,7 +69,7 @@ export const makeInstance = (
   scope: Scope.Closeable,
   parent: InstanceHandle | undefined,
   connected: boolean,
-  wake: Effect.Effect<void>
+  wake: () => void
 ): InstanceHandle => {
   const slots: Array<unknown> = []
   let cursor = 0
@@ -75,6 +82,15 @@ export const makeInstance = (
         return value
       })
     })
+  const invalidateUnsafe = (): void => {
+    // dirty(instance) implies dirty(ancestors): stop at the first dirty one
+    let current: InstanceHandle | undefined = handle
+    while (current !== undefined && !current.dirty) {
+      current.dirty = true
+      current = current.parent
+    }
+    wake()
+  }
   const handle: InstanceHandle = {
     type,
     parent,
@@ -86,15 +102,8 @@ export const makeInstance = (
     node: undefined,
     handlerKeys: new Set(),
     children: new Set(),
-    invalidate: Effect.suspend(() => {
-      // dirty(instance) implies dirty(ancestors): stop at the first dirty one
-      let current: InstanceHandle | undefined = handle
-      while (current !== undefined && !current.dirty) {
-        current.dirty = true
-        current = current.parent
-      }
-      return wake
-    }),
+    invalidate: Effect.sync(invalidateUnsafe),
+    invalidateUnsafe,
     reset: () => {
       cursor = 0
     },
@@ -122,9 +131,9 @@ interface Subscription {
 /**
  * One slot holding a subscription that follows its source: when a later
  * render passes a different source at the same position (a `State` handle
- * from new props), it subscribes to the new one first, then releases the
- * old one. `subscribe` returns the release; the last one runs when the
- * instance scope closes.
+ * from new props, `Atom.family(props.id)` with a new id), it subscribes to
+ * the new one first, then releases the old one. `subscribe` returns the
+ * release; the last one runs when the instance scope closes.
  */
 export const follow = (
   instance: InstanceShape,

@@ -57,7 +57,7 @@ body, such as `todos.filter((todo) => !todo.completed).length`.
 | --- | --- |
 | `View.State(initial)` | Create state owned by this component instance. The initial value is used only on its first render. |
 | `View.SharedState(initial)` | Create state that multiple components or sessions can share. Put it in a service to give it a lifetime beyond one component. |
-| `View.watch(source)` | Read and subscribe to a local state handle, shared state, or Effect `SubscriptionRef`. Changes schedule a render of this component. |
+| `View.watch(source)` | Read and subscribe to a local state handle, shared state, Effect `SubscriptionRef` or Effect atom; see [atoms](#atoms). Changes schedule a render of this component. |
 
 Both state types expose `value` for synchronous reads, `get` for an Effect
 read, and `set(value)` / `update(f)` for writes. Writes are Effects: return
@@ -68,12 +68,12 @@ and a `changes` stream for consumers outside components. Updates to the
 same shared state are serialized, including updates from different sessions.
 Sharing does not imply persistence: the state lasts as long as its owner.
 
-**Call `View.State`, `View.watch` and `View.once` in the same order on each
-render.** They occupy slots in the component instance. A `watch` slot
-follows its source: when a later render passes a different one at the same
-position, such as a new handle in the props, it subscribes to the new source
-and releases the old one. A component's own state is tracked automatically;
-state from elsewhere must be watched:
+**Call `View.State`, `View.watch`, `View.result` and `View.once` in the
+same order on each render.** They occupy slots in the component instance.
+A `watch` slot follows its source: when a later render passes a different
+one at the same position, such as a new handle in the props, it
+subscribes to the new source and releases the old one. A component's own
+state is tracked automatically; state from elsewhere must be watched:
 
 ```tsx
 const CountLabel = View.Component(function*(props: {
@@ -314,6 +314,134 @@ if (yield* View.connected) {
 keeps slot order stable. The ticker ends when the component leaves the tree
 or the session closes. `once` applies to one instance, not to the whole
 application or to subsequent reconnects.
+
+### Atoms
+
+Components can watch Effect atoms, from `effect/unstable/reactivity`, as
+they watch state. The integration is experimental: that module is unstable
+and may change in any Effect release.
+
+```tsx
+import { Atom, AtomRegistry } from "effect/unstable/reactivity"
+
+const count = Atom.make(0).pipe(Atom.keepAlive)
+const doubled = Atom.map(count, (n) => n * 2)
+
+const Doubled = View.Component(function*() {
+  const registry = yield* AtomRegistry.AtomRegistry
+  const n = yield* View.watch(doubled)
+  return <button onClick={() => registry.update(count, (x) => x + 1)}>{n}</button>
+})
+```
+
+| API | Purpose |
+| --- | --- |
+| `View.watch(atom)` | Read an atom and re-render when it changes. An async atom gives its `AsyncResult`. |
+| `View.result(atom, options?)` | Wait for the value of an async atom. Its typed error becomes the component's. |
+
+A `watch` or `result` of an atom is a slot like any other. It follows a
+new atom at the same position, such as `Atom.family(props.id)` with a new
+id, and a new registry.
+
+Atoms live in the `AtomRegistry` service, so a component that watches one
+needs `AtomRegistry`, and its parent brings it in with `View.use`. Provide
+`AtomRegistry.layer` once: next to the server layer, for one registry per
+process, or in the `Cloudflare.app` layer, for one per Durable Object.
+Every session shares the atoms of its registry. Build the registry with a
+layer, not at module scope, so that it is disposed with the application.
+
+`View.provide(App, AtomRegistry.layer)` gives each session a registry of
+its own instead. The HTTP render and the live session of a tab are
+separate sessions with separate registries, so the live session starts
+its atoms again, whatever their TTL.
+
+| Atom | Use | Lifetime |
+| --- | --- | --- |
+| `Atom.make(value).pipe(Atom.keepAlive)` | Application state | As long as the registry. |
+| A plain or derived atom | Derived values | Freed a tick after its last watcher leaves. A writable one loses its value. |
+| An atom with `Atom.setIdleTTL(duration)`, or any atom in a registry from `AtomRegistry.layerOptions({ defaultIdleTTL })` | Async data, families | Kept for the TTL after its last watcher leaves. With a shared registry, other tabs and the live session reuse its value. |
+| `Atom.runtime(layer).pipe(Atom.keepAlive)` | Services for effectful atoms | Its layer is built once per registry, apart from the application's layers. |
+
+With a shared registry, the HTTP render and the live session watch the
+same atoms. The HTTP render's instances close once the document is
+rendered, so an async atom without an idle TTL is freed and its Effect
+interrupted; the live session runs it again. With an idle TTL, the live
+session finds it running or done.
+`AtomRegistry.layerOptions({ defaultIdleTTL: 5_000 })` gives every atom
+one; the library sets no default.
+
+An atom built from an Effect gives an `AsyncResult`. An Effect that
+completes synchronously is a `Success` in the same render. Otherwise the
+render shows `Initial`, and the session renders again when the value
+arrives. Render each state with `AsyncResult.builder`, whose `exhaustive()`
+only type-checks once every typed error, defects and interruptions are
+handled:
+
+```tsx
+const runtime = Atom.runtime(Titles.layer).pipe(Atom.keepAlive)
+const title = Atom.family((id: string) =>
+  runtime.atom(Effect.gen(function*() {
+    const titles = yield* Titles
+    return yield* titles.find(id) // fails with NotFound
+  })).pipe(Atom.setIdleTTL("30 seconds"))
+)
+
+const Title = View.Component(function*(props: { readonly id: string }) {
+  const result = yield* View.watch(title(props.id))
+  return AsyncResult.builder(result)
+    .onInitial(() => <p>Loading…</p>)
+    .onErrorTag("NotFound", (error) => <p>No title for {error.id}</p>)
+    .onDefect(() => <p>Could not load the title.</p>)
+    .onInterrupt(() => <p>Stopped.</p>)
+    .onSuccess((value) => <h1>{value}</h1>)
+    .exhaustive()
+})
+```
+
+Here `Titles` stands for an application service whose `find` fails with
+`NotFound`. `View.result` waits instead. The render waits while the atom
+is `Initial`, and with `{ suspendOnWaiting: true }` while it refreshes.
+The atom's typed error becomes the component's, handled with
+[`View.catchTag`](#typed-errors) like any other. The whole session render
+waits with it, and so does the HTTP response. Use it for fast data, or
+for data the first page must contain.
+
+Handlers write through the registry taken in the body.
+`registry.set(atom, value)` and `registry.update(atom, f)` return nothing,
+so a handler calls them directly. `Atom.set` is an Effect that needs
+`AtomRegistry`, which a handler cannot require, so it is a type error. A
+write notifies the watchers synchronously, inside the writer's call, which
+may be another session's handler. Each listener only marks its component
+dirty and wakes its session. A write that lands while that session renders
+leaves the component dirty for the next render.
+
+`Atom.fn` in a shared registry is one action for every tab: a call from a
+second tab interrupts the first. Run an action that belongs to one tab as
+an Effect in its handler, and keep its status in `View.State`.
+
+The Effects of atoms run on fibers of the registry. They do not see the
+session's services, logger or tracer; an effectful atom gets its services
+from `Atom.runtime`. Closing a session only unsubscribes its components.
+When that was an atom's last watcher, the atom follows its lifetime from
+the table above. A plain one is freed a tick later, and its Effect
+interrupted. One with an idle TTL keeps running, and is interrupted only
+if it is still running when the TTL expires, rounded up to the registry's
+timeout resolution (1 second by default). A `keepAlive` one is kept, and
+its Effect is interrupted only when the registry is disposed.
+
+Pitfalls:
+
+- Define atoms at module level, or take them from an `Atom.family`. An
+  atom created in a body is a new atom on every render. The watch follows
+  it, so a writable one goes back to its initial value, and an async one
+  runs its Effect again and renders again, in a loop.
+- A derived atom's `read` must not throw. It runs inside the writer's
+  `set`, possibly in another session's handler.
+- Do not write atoms or state in a component body. The write renders the
+  component again, which writes again, in a loop.
+- A family of `keepAlive` atoms keeps every member it creates, so it grows
+  without bound. Give a family an idle TTL instead.
+- `View.result` has no timeout.
 
 ### Client-side islands and hooks
 
@@ -675,6 +803,7 @@ leave the page.
 | File | Responsibility |
 | --- | --- |
 | [view.ts](./src/internal/view.ts) | Public component helpers, local and shared state, subscriptions |
+| [atom.ts](./src/internal/atom.ts) | Atom subscriptions; the only module that imports `effect/unstable/reactivity` at runtime |
 | [instance.ts](./src/internal/instance.ts) | Instance scopes, slots and invalidation |
 | [session.ts](./src/internal/session.ts) | Instance and handler registries, event dispatch |
 | [vnode.ts](./src/internal/vnode.ts) | JSX nodes and factory, how boundaries render, recover and wrap their subtree |
