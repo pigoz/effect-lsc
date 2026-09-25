@@ -170,23 +170,26 @@ export const session = <E = never, R = never>(
       )
     )
 
-    // Re-render whenever any watched state changes. Bursts collapse into one.
+    // The render loop: the first render when the socket opens, then one
+    // whenever watched state changes. Bursts collapse into one. Every render
+    // runs on this fiber, so a render that waits (View.result) is never
+    // overlapped by the next.
     yield* Effect.forkScoped(Effect.forever(Effect.andThen(Queue.take(session.dirty), push)))
     // Events are handled one at a time, in arrival order.
     yield* Effect.forkScoped(
       Effect.forever(Effect.flatMap(Queue.take(inbox), (event) => dispatch(session, event, report("handler"))))
     )
     // The read loop owns the socket: on some platforms it completes the
-    // handshake and only then accepts writes, so the first render goes in
-    // onOpen. Runs until the socket closes; closing the scope stops the
-    // fibers above.
+    // handshake and only then accepts writes, so onOpen asks the render
+    // loop for the first render. Runs until the socket closes; closing the
+    // scope stops the fibers above.
     yield* socket.runString(
       (message) =>
         decodeClientMessage(message).pipe(
           Effect.flatMap((decoded) => Queue.offer(inbox, decoded)),
           Effect.catchCause((cause) => Effect.logWarning("effect-lsc: ignoring malformed client message", cause))
         ),
-      { onOpen: push }
+      { onOpen: Effect.asVoid(Queue.offer(session.dirty, undefined)) }
     )
   }).pipe(
     Effect.scoped,

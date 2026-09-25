@@ -741,6 +741,10 @@ tree and a dirty queue. The dirty queue holds one pending signal, coalescing
 bursts of changes. Event processing and rendering have separate loops, so
 this coalescing is not a transaction around a whole handler.
 
+The render loop runs every render of the session, the first one included,
+one at a time. A render that waits, in `View.result` for instance, delays
+the next one. Changes that arrive meanwhile are rendered after it.
+
 ### Identity and component reuse
 
 Instances are identified by their path in the tree: positional children use
