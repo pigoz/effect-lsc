@@ -5,6 +5,7 @@ import { Cause, Deferred, Effect, Exit, Ref, Scope } from "effect"
 import { View } from "effect-lsc/view"
 import { render } from "../src/internal/render.ts"
 import { dispatch, makeSession } from "../src/internal/session.ts"
+import { type Boundary, BoundaryTypeId } from "../src/internal/vnode.ts"
 
 describe("failure semantics", () => {
   it.effect("a failed render leaves the instance dirty and without a node, so it is never memoized", () =>
@@ -111,6 +112,37 @@ describe("failure semantics", () => {
       yield* dispatch(session, { t: "event", type: "click", id: "r.0.0" })
       yield* dispatch(session, { t: "event", type: "click", id: "r.0.1.0" })
       assert.deepStrictEqual(fired, ["button", "ok"])
+    }))
+
+  it.effect("a boundary can recover with an Effect, and a failing recovery reaches the boundary above", () =>
+    Effect.gen(function*() {
+      const Bad = View.Component(function*(p: { readonly explode: boolean }) {
+        if (p.explode) return yield* Effect.die("boom")
+        return <b>ok</b>
+      })
+      // recovers with an Effect, or passes the failure on when `pass` is set
+      const boundary: Boundary = {
+        render: (props: { readonly children?: View.Child }) => props.children,
+        recover: (cause, props: { readonly pass: boolean }) =>
+          props.pass ? Effect.failCause(cause) : Effect.succeed(<p>inner: {String(Cause.squash(cause))}</p>)
+      }
+      const Recover = Object.assign(
+        (props: { readonly pass: boolean; readonly children?: View.Child }) => props.children,
+        { [BoundaryTypeId]: boundary }
+      )
+      const App = (p: { readonly explode: boolean; readonly pass: boolean }) => (
+        <View.ErrorBoundary fallback={(cause) => <p>outer: {String(Cause.squash(cause))}</p>}>
+          <Recover pass={p.pass}>
+            <Bad explode={p.explode} />
+          </Recover>
+        </View.ErrorBoundary>
+      )
+      const session = yield* makeSession()
+      assert.strictEqual(yield* render(session, <App explode={false} pass={false} />), "<b>ok</b>")
+      assert.strictEqual(yield* render(session, <App explode={true} pass={false} />), "<p>inner: boom</p>")
+      assert.strictEqual(yield* render(session, <App explode={true} pass={true} />), "<p>outer: boom</p>")
+      // both boundaries retry when the subtree changes
+      assert.strictEqual(yield* render(session, <App explode={false} pass={true} />), "<b>ok</b>")
     }))
 
   it.effect("handler failures and defects are reported and the session goes on", () =>

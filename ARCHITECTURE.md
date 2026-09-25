@@ -378,6 +378,7 @@ leave the page.
 | [view.ts](./src/internal/view.ts) | Public component helpers, local and shared state, subscriptions |
 | [instance.ts](./src/internal/instance.ts) | Instance scopes, slots and invalidation |
 | [session.ts](./src/internal/session.ts) | Instance and handler registries, event dispatch |
+| [vnode.ts](./src/internal/vnode.ts) | JSX nodes and factory, how boundaries render and recover |
 | [render.ts](./src/internal/render.ts) | JSX traversal and component reuse |
 | [wire.ts](./src/internal/wire.ts) | Render tree representation and diffs |
 | [protocol.ts](./src/internal/protocol.ts) | Message schemas and encoding |

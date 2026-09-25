@@ -19,7 +19,7 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import { Instance } from "./instance.ts"
 import { render as render_ } from "./render.ts"
 import { makeSession } from "./session.ts"
-import type { Child } from "./vnode.ts"
+import type { Boundary, Child } from "./vnode.ts"
 import { BoundaryTypeId, Fragment as Fragment_, raw as raw_ } from "./vnode.ts"
 
 export type {
@@ -58,7 +58,13 @@ export const Fragment: typeof Fragment_ = Fragment_
 export const ErrorBoundary: (props: {
   readonly fallback: (cause: Cause.Cause<unknown>) => Child
   readonly children?: Child
-}) => Child = Object.assign((props: { readonly children?: Child }) => props.children, { [BoundaryTypeId]: BoundaryTypeId })
+}) => Child = Object.assign((props: { readonly children?: Child }) => props.children, {
+  [BoundaryTypeId]: {
+    render: (props: { readonly children?: Child }) => props.children,
+    recover: (cause: Cause.Cause<unknown>, props: { readonly fallback: (cause: Cause.Cause<unknown>) => Child }) =>
+      props.fallback(cause)
+  } satisfies Boundary
+})
 
 // -----------------------------------------------------------------------------
 // Components

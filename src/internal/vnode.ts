@@ -5,6 +5,7 @@
  * function from props to a `Child` (or an `Effect` producing one), and the
  * renderer turns the resulting tree into an HTML string on the server.
  */
+import type * as Cause from "effect/Cause"
 import type * as Effect from "effect/Effect"
 import { hasProperty } from "effect/Predicate"
 
@@ -73,14 +74,34 @@ export const Fragment: unique symbol = Symbol.for("effect-lsc/Fragment")
 export type Fragment = typeof Fragment
 
 /**
- * Marks a component the renderer treats as an error boundary: failures
- * while rendering its output are caught and `props.fallback(cause)` is
- * rendered instead. See `View.ErrorBoundary`.
+ * Marks a component the renderer treats as a boundary. The property holds
+ * the component's `Boundary`, which says how it renders and recovers. See
+ * `View.ErrorBoundary`.
  */
 export const BoundaryTypeId = "~effect-lsc/ErrorBoundary" as const
 export type BoundaryTypeId = typeof BoundaryTypeId
 
 export const isBoundary = (type: unknown): boolean => typeof type === "function" && BoundaryTypeId in type
+
+/**
+ * How a boundary recovers: it receives the failure of its whole subtree
+ * (its own body and every descendant) and its props. Returning a failing
+ * Effect passes the failure on to the next boundary up.
+ */
+export type Recover = (cause: Cause.Cause<unknown>, props: any) => Child | Effect.Effect<Child, unknown>
+
+/**
+ * What the renderer runs for a boundary component. `render` is the body,
+ * whose output the renderer renders. When that render (body and subtree)
+ * fails, what `recover` returns is rendered in its place; a boundary
+ * without `recover` lets the failure through.
+ */
+export interface Boundary {
+  readonly render: (props: any) => Child | Effect.Effect<Child, unknown, unknown>
+  readonly recover?: Recover | undefined
+}
+
+export const boundaryOf = (type: unknown): Boundary => (type as { readonly [BoundaryTypeId]: Boundary })[BoundaryTypeId]
 
 export const isVNode = (u: unknown): u is VNode => hasProperty(u, TypeId)
 

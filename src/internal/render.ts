@@ -16,7 +16,6 @@
  * `key` or index. Components become nested nodes, so a component is a unit
  * of both identity and patching.
  */
-import type * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
@@ -26,7 +25,7 @@ import { Instance, type InstanceHandle, makeInstance, type Owner, shallowEqualPr
 import type { Session } from "./session.ts"
 import { handlerKey } from "./session.ts"
 import type { Child, VNode } from "./vnode.ts"
-import { isBoundary, isVNode } from "./vnode.ts"
+import { boundaryOf, isBoundary, isVNode } from "./vnode.ts"
 import type { Dyn, Node } from "./wire.ts"
 import { fingerprint, makeList, toHtml } from "./wire.ts"
 
@@ -257,8 +256,9 @@ const buildComponent = (
     const owner = ctx.current
     ctx.current = instance
     const current = instance
+    const boundary = isBoundary(node.type) ? boundaryOf(node.type) : undefined
     const body = Effect.gen(function*() {
-      const result = node.type(node.props)
+      const result = boundary !== undefined ? boundary.render(node.props) : node.type(node.props)
       const output: Child = Effect.isEffect(result)
         ? yield* Effect.provideService(result as Effect.Effect<Child, unknown, Instance>, Instance, current)
         : result
@@ -266,20 +266,21 @@ const buildComponent = (
       yield* renderChildren(ctx, own, output, path, false)
       return finish(own, isElement(output))
     })
-    const rendered = isBoundary(node.type)
-      ? Effect.catchCause(body, (cause) =>
-        Effect.gen(function*() {
-          // The subtree failed: forget what the failed attempt registered and
-          // render the fallback in its place. The instances it reached are
-          // kept; the boundary re-renders (and retries) when its subtree
-          // changes.
-          discardAttempt(ctx.session, current)
-          const fallback = (node.props as { readonly fallback: (cause: Cause.Cause<unknown>) => Child }).fallback(cause)
-          const own = newBuilder()
-          yield* renderChildren(ctx, own, fallback, path, false)
-          return finish(own, isElement(fallback))
-        }))
-      : body
+    const recover = boundary?.recover
+    const rendered = recover === undefined ? body : Effect.catchCause(body, (cause) =>
+      Effect.gen(function*() {
+        // The subtree failed: forget what the failed attempt registered and
+        // render the fallback in its place. The instances it reached are
+        // kept; the boundary re-renders (and retries) when its subtree
+        // changes. A failing recovery passes the failure to the next
+        // boundary up.
+        discardAttempt(ctx.session, current)
+        const recovered = recover(cause, node.props)
+        const fallback: Child = Effect.isEffect(recovered) ? yield* (recovered as Effect.Effect<Child, unknown>) : recovered
+        const own = newBuilder()
+        yield* renderChildren(ctx, own, fallback, path, false)
+        return finish(own, isElement(fallback))
+      }))
     return yield* rendered.pipe(
       Effect.tapCause(() =>
         Effect.sync(() => {
