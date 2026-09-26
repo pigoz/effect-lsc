@@ -674,13 +674,15 @@ the failing one, are closed and lose their state. The fallback has paths
 of its own, so a component in it, such as `fallback={() => <Retry />}`,
 does not replace `<Chart />`. It is closed when a retry succeeds.
 
-When a socket closes, its session scope closes too. The running handler
-and render are interrupted first. Then the instances close, and their
-tasks, subscriptions, `View.once` resources and `View.provide` layers are
-released, so a handler never resumes on a released resource. A reconnect
-always starts a new session. Shared services outside that session can
-retain state, but restarting their server process or Durable Object loses
-in-memory data.
+A session ends when its socket closes, when the connection drops, or when
+a render fails. The running handler and render are interrupted first.
+Then the instances close, and their tasks, subscriptions, `View.once`
+resources and `View.provide` layers are released, so a handler never
+resumes on a released resource. The server releases its end of the socket
+last; after a failed render it has already sent the 1011 close. A
+reconnect always starts a new session. Shared services outside that
+session can retain state, but restarting their server process or Durable
+Object loses in-memory data.
 
 The browser exposes these signals for application UI and diagnostics:
 
@@ -757,8 +759,9 @@ a warning.
 
 1. An HTTP request renders the component with temporary state and returns
    the document and browser runtime. The temporary scope is then closed.
-2. The runtime opens a WebSocket at the page's path. The server creates a
-   new session, renders again, and sends the initial render tree.
+2. The runtime opens a WebSocket at the page's path. The server accepts
+   the connection, creates a new session, renders again with fresh state,
+   and sends the initial render tree.
 3. A browser event sends its type, handler ID and input values. The handler
    function itself stays on the server.
 4. The session looks up the handler and runs its Effect. State writes mark
@@ -772,11 +775,14 @@ tree and a dirty queue. The dirty queue holds one pending signal, coalescing
 bursts of changes. Event processing and rendering have separate loops, so
 this coalescing is not a transaction around a whole handler.
 
-The render loop runs every render of the session, the first one included,
-one at a time. A render that waits, in `View.result` for instance, delays
-the next one. Changes that arrive meanwhile are rendered after it. Events
-that arrive before the first render ends wait for it; later ones are
-handled while a render waits.
+A session runs three loops. The read loop puts each message from the
+browser into an inbox as it arrives, so it sees a closed socket at once,
+even while a handler runs. The event loop handles the inbox one event at a
+time, in arrival order. The render loop runs every render of the session,
+the first one included, one at a time. A render that waits, in
+`View.result` for instance, delays the next one. Changes that arrive
+meanwhile are rendered after it. Events that arrive before the first
+render ends wait for it; later ones are handled while a render waits.
 
 ### Identity and component reuse
 

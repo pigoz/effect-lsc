@@ -5,7 +5,7 @@
 import { Config, Effect, Layer } from "effect"
 import type { HttpServer } from "effect/unstable/http"
 
-const port = Config.port("PORT").pipe(Config.withDefault(3000))
+const port = Config.Port("PORT").pipe(Config.withDefault(3000))
 
 export const serve = async <E>(app: Layer.Layer<never, E, HttpServer.HttpServer>): Promise<void> => {
   if (typeof (globalThis as any).Bun !== "undefined") {

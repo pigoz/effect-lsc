@@ -42,11 +42,11 @@ import type { Services } from "./view.ts"
  * The Workers globals this module uses, typed locally so the library does
  * not depend on `@cloudflare/workers-types`.
  */
-interface WorkerWebSocket {
+interface WorkerWebSocket extends Socket.WebSocketLike {
   accept(): void
 }
 
-declare const WebSocketPair: new() => { readonly 0: WorkerWebSocket & WebSocket; readonly 1: WorkerWebSocket & WebSocket }
+declare const WebSocketPair: new() => { readonly 0: WorkerWebSocket; readonly 1: WorkerWebSocket }
 
 export interface AppOptions<R> extends MountOptions {
   /** The services the component requires, built once per object. */
@@ -90,9 +90,8 @@ export const app = <E = never, R = never, L extends Layer.Layer<never, unknown, 
       const rendered = await runtime.runPromiseExit(page(component, options) as Effect.Effect<string, unknown, ROut>)
       if (rendered._tag === "Failure") {
         // The services are built: a typed failure here got past the types.
-        const typed = rendered.cause.reasons.some((reason) => Cause.isFailReason(reason) && !Socket.isSocketError(reason.error))
         console.error(
-          typed
+          Cause.hasFails(rendered.cause)
             ? "effect-lsc: render failed (a typed error reached the root although the types say it cannot: " +
               "look for a cast, or a component from View.use rendered elsewhere)"
             : "effect-lsc: render failed",
@@ -111,9 +110,32 @@ export const app = <E = never, R = never, L extends Layer.Layer<never, unknown, 
     const pair = new WebSocketPair()
     const client = pair[0]
     const server = pair[1]
-    server.accept()
-    const socket = await runtime.runPromise(Socket.fromWebSocket(Effect.succeed(server)))
-    runtime.runFork(session(component, socket, options) as Effect.Effect<void, never, ROut>)
+    // The session owns the server end, as it owns the connection on Bun and
+    // Node. It accepts it when it connects, so workerd holds the frames the
+    // browser sends before, and closes it when it ends, unless the browser
+    // closed or dropped it first: workerd still reports a dropped socket
+    // open, and closing it logs "Network connection lost".
+    let closed = false
+    const connect = Effect.acquireRelease(
+      Effect.sync(() => {
+        server.addEventListener("close", () => {
+          closed = true
+        }, { once: true })
+        server.accept()
+        return server
+      }),
+      () =>
+        Effect.sync(() => {
+          if (!closed) server.close(1000)
+        })
+    )
+    runtime.runFork(
+      Effect.flatMap(Socket.fromWebSocket(connect), (socket) => session(component, socket, options)) as Effect.Effect<
+        void,
+        never,
+        ROut
+      >
+    )
     return new Response(null, { status: 101, webSocket: client } as ResponseInit)
   }
   return { fetch, dispose: () => runtime.dispose() }

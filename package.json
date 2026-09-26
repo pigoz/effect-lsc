@@ -78,22 +78,22 @@
     "smoke": "bun scripts/smoke-package.ts"
   },
   "peerDependencies": {
-    "effect": "^4.0.0-rc.112"
+    "effect": "^4.0.0-rc.117"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260904.1",
     "@effect/language-service": "^0.87.2",
-    "@effect/platform-bun": "4.0.0-rc.112",
-    "@effect/platform-node": "4.0.0-rc.112",
-    "@effect/vitest": "4.0.0-rc.112",
+    "@effect/platform-bun": "4.0.0-rc.117",
+    "@effect/platform-node": "4.0.0-rc.117",
+    "@effect/vitest": "4.0.0-rc.117",
     "@types/bun": "^1.4.0",
-    "effect": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.117",
     "idiomorph": "0.7.4",
     "playwright": "1.62.1",
     "tsx": "4.23.13",
     "typescript": "7.0.2",
     "vite": "^8.2.2",
-    "vitest": "4.1.11",
+    "vitest": "5.0.2",
     "wrangler": "4.129.0"
   },
   "publishConfig": {

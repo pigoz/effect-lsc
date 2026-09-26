@@ -14,7 +14,7 @@
  * module wires them to a Durable Object.
  */
 import * as Cause from "effect/Cause"
-import * as Deferred from "effect/Deferred"
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
@@ -24,7 +24,7 @@ import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import * as Socket from "effect/unstable/socket/Socket"
 import { script } from "./runtime.ts"
-import { type ClientMessage, decodeClientMessage, encodeServerMessage } from "./protocol.ts"
+import { type ClientMessage, decodeClientMessage, encodeServerMessage, type ServerMessage } from "./protocol.ts"
 import { render, renderTree } from "./render.ts"
 import { dispatch, makeSession } from "./session.ts"
 import type { Errors, NoScope, Services } from "./view.ts"
@@ -87,11 +87,11 @@ type RootCheck<E> = [E] extends [never] ? unknown : { readonly "effect-lsc: unha
 /**
  * The types say no typed error reaches the root; one that does got past
  * them, through a cast (`as any`) or a component from `View.use` rendered
- * elsewhere. Say so in the log. A `SocketError` comes from sending the
- * patch, not from the render, and gets no hint.
+ * elsewhere. Say so in the log. Only failures of the tree get here: a
+ * failed send ends the session as a close does.
  */
 const rootFailure = (message: string, cause: Cause.Cause<unknown>) =>
-  cause.reasons.some((reason) => Cause.isFailReason(reason) && !Socket.isSocketError(reason.error))
+  Cause.hasFails(cause)
     ? Effect.logError(
       `${message} (a typed error reached the root although the types say it cannot: ` +
         "look for a cast, or a component from View.use rendered elsewhere)",
@@ -130,7 +130,8 @@ const pageResponse = (component: ComponentFn<{}, any, any>, options: MountOption
 
 /**
  * Runs the live session for `component` over `socket`, until the socket
- * closes.
+ * closes. The session acquires the socket's reader and releases it, which
+ * closes the socket, when it ends: do not read from `socket` elsewhere.
  *
  * Failure semantics:
  * - a failing event handler is logged and reported to the browser as an
@@ -138,8 +139,9 @@ const pageResponse = (component: ComponentFn<{}, any, any>, options: MountOption
  * - a failing render is reported the same way, then the session ends and
  *   the socket is closed with code 1011: the browser reconnects and mounts
  *   a fresh session (use `View.ErrorBoundary` to contain failures instead)
- * - a closed socket is a normal end; the running handler and render are
- *   interrupted, then every instance of the session is closed
+ * - a closed socket is a normal end, and so is a failed send; the running
+ *   handler and render are interrupted, then every instance of the session
+ *   is closed
  */
 export const session = <E = never, R = never>(
   component: Root<E, R>,
@@ -147,63 +149,83 @@ export const session = <E = never, R = never>(
   options?: { readonly debug?: boolean | undefined }
 ): Effect.Effect<void, never, Services<R>> =>
   Effect.gen(function*() {
+    // Connect first. On Node this runs the WebSocket handshake, and writes
+    // wait for it, so nothing is written before. Acquired first, the socket
+    // is released last, after the instances.
+    const pull = yield* Socket.readerString(socket)
+    const { write } = yield* socket.writer
     const session = yield* makeSession(true)
-    const write = yield* socket.writer
     const inbox = yield* Queue.unbounded<ClientMessage>()
-    const rendered = yield* Deferred.make<void>()
-    const describe = (scope: "handler" | "render", cause: Cause.Cause<unknown>) =>
-      options?.debug ? Cause.pretty(cause) : `${scope} failed`
+    const send = (message: ServerMessage) => write(encodeServerMessage(message))
     const report = (scope: "handler" | "render") => (cause: Cause.Cause<unknown>) =>
-      Effect.ignore(write(encodeServerMessage({ t: "error", scope, message: describe(scope, cause) })))
+      Effect.ignore(send({ t: "error", scope, message: options?.debug ? Cause.pretty(cause) : `${scope} failed` }))
 
     // Render, diff against the tree the browser has, send only the patch.
-    // A failed render ends the session: report, then close the socket.
-    const push = renderTree(session, jsx(component, {})).pipe(
-      Effect.flatMap((tree) => {
+    // A failed render is reported, closes the socket with 1011 and ends the
+    // session. A failed send is not a render failure: the socket is gone,
+    // and its SocketError ends the session as a close does.
+    const push = Effect.matchCauseEffect(renderTree(session, jsx(component, {})), {
+      onSuccess: (tree) => {
         const patch = diffNode(session.tree, tree, session.sentStatics)
         session.tree = tree
-        return patch === undefined ? Effect.void : write(encodeServerMessage({ t: "render", p: patch }))
-      }),
-      Effect.catchCause((cause) =>
+        return patch === undefined ? Effect.void : send({ t: "render", p: patch })
+      },
+      onFailure: (cause) =>
         rootFailure("effect-lsc: render failed, ending the session", cause).pipe(
           Effect.andThen(report("render")(cause)),
-          Effect.andThen(Effect.ignore(write(new Socket.CloseEvent(1011, "render failed"))))
+          Effect.andThen(Effect.ignore(write(new Socket.CloseEvent(1011, "render failed")))),
+          Effect.andThen(Effect.fail(new RenderFailed()))
         )
-      ),
-      Effect.ensuring(Deferred.succeed(rendered, undefined))
+    })
+
+    // The read loop: every frame into the inbox as it arrives. It never
+    // waits for a handler or a render, so it sees a close at once: every
+    // close, clean ones included, fails the pull with a SocketError.
+    const enqueue = (frame: string) =>
+      decodeClientMessage(frame).pipe(
+        Effect.flatMap((event) => Queue.offer(inbox, event)),
+        Effect.catchCause((cause) => Effect.logWarning("effect-lsc: ignoring malformed client message", cause))
+      )
+    const receive = pull.pipe(
+      Effect.flatMap((frames) => Effect.forEach(frames, enqueue, { discard: true })),
+      Effect.forever
     )
 
-    // The render loop: the first render when the socket opens, then one
-    // whenever watched state changes. Bursts collapse into one. Every render
-    // runs on this fiber, so a render that waits (View.result) is never
-    // overlapped by the next.
-    yield* Effect.forkScoped(Effect.forever(Effect.andThen(Queue.take(session.dirty), push)))
-    // Events are handled one at a time, in arrival order. Until the first
-    // render ends the session has no handlers, although the browser already
-    // shows the page, so events wait for it.
-    yield* Effect.forkScoped(
-      Effect.andThen(
-        Deferred.await(rendered),
-        Effect.forever(Effect.flatMap(Queue.take(inbox), (event) => dispatch(session, event, report("handler"))))
-      )
+    // The event loop: the events of the inbox, one at a time, in arrival
+    // order.
+    const handle = Effect.forever(
+      Effect.flatMap(Queue.take(inbox), (event) => dispatch(session, event, report("handler")))
     )
-    // The read loop owns the socket: on some platforms it completes the
-    // handshake and only then accepts writes, so onOpen asks the render
-    // loop for the first render. Runs until the socket closes; closing the
-    // scope stops the fibers above, then closes the instances.
-    yield* socket.runString(
-      (message) =>
-        decodeClientMessage(message).pipe(
-          Effect.flatMap((decoded) => Queue.offer(inbox, decoded)),
-          Effect.catchCause((cause) => Effect.logWarning("effect-lsc: ignoring malformed client message", cause))
-        ),
-      { onOpen: Effect.asVoid(Queue.offer(session.dirty, undefined)) }
-    )
+
+    // The render loop: the first render, then one whenever watched state
+    // changes (bursts collapse into one), all on this fiber, so a render
+    // that waits (View.result) is never overlapped by the next. The session
+    // has no handlers until the first render ends, although the browser
+    // already shows the page, so the event loop starts then, as a child of
+    // this fiber, and runs beside the later renders.
+    const renders = Effect.gen(function*() {
+      yield* push
+      yield* Effect.forkChild(handle)
+      return yield* Effect.forever(Effect.andThen(Queue.take(session.dirty), push))
+    })
+
+    // Both loops end only by failing: the read loop when the socket closes,
+    // the render loop when a render fails or a send finds the socket gone.
+    // The first to end interrupts the other, and a fiber ends after its
+    // children, so no handler or render still runs when the race returns,
+    // or when the session itself is interrupted (Bun and Node do it when
+    // the connection drops). Then the scope closes the instances, and
+    // releases the socket.
+    return yield* Effect.raceFirst(receive, renders)
   }).pipe(
     Effect.scoped,
-    Effect.catchTag("SocketError", () => Effect.void),
+    // A close, and a failed render already reported, are normal ends.
+    Effect.catchTags({ SocketError: () => Effect.void, RenderFailed: () => Effect.void }),
     Effect.catchCause((cause) => Effect.logError("effect-lsc: live session failed", cause))
   ) as Effect.Effect<void, never, Services<R>>
+
+/** Ends a session whose render failed, once that is reported and the socket closed with 1011. */
+class RenderFailed extends Data.TaggedError("RenderFailed") {}
 
 const isUpgrade = (request: HttpServerRequest.HttpServerRequest) =>
   request.headers["upgrade"]?.toLowerCase() === "websocket"

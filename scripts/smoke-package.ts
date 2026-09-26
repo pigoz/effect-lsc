@@ -34,7 +34,7 @@ const expected = '<main><p data-lsc-click="r.0.0">Hello dist 41</p><div data-lsc
 if (html !== expected) throw new Error("unexpected html: " + html)
 console.log("ok")
 `)
-  run(`npm install --silent --no-audit --no-fund effect@4.0.0-rc.112 typescript@7 tsx ${tarball}`, dir)
+  run(`npm install --silent --no-audit --no-fund effect@4.0.0-rc.117 typescript@7 tsx ${tarball}`, dir)
   console.log("types:", run("npx tsc -p tsconfig.json && echo ok", dir))
   console.log("bun:", run("bun main.tsx", dir))
   console.log("node:", run("node --import tsx main.tsx", dir))
