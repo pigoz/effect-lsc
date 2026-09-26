@@ -124,6 +124,33 @@ its layer to the server with `Layer.provide(Todos.layer)`, or to
 `Cloudflare.app` through its `layer` option. `NewTodo` needs `Todos`, so its
 parent brings it in with `View.use`, and the root's type requires `Todos`.
 
+A handler must also handle its typed errors. The session runs each event
+as a program of its own, and like a root, that program may leave no typed
+error unhandled, so a handler that can fail with one is a type error.
+Handle expected errors in the handler, with `Effect.catchTag`,
+`Effect.catch` or `Effect.orDie`:
+
+```tsx
+const Remove = View.Component(function*(props: { readonly id: string }) {
+  const users = yield* Users
+  const gone = yield* View.State(false)
+  return (
+    <button onClick={() =>
+      users.remove(props.id).pipe( // fails with UserNotFound
+        Effect.catchTag("UserNotFound", () => gone.set(true))
+      )}>
+      {gone.value ? "Already removed" : "Remove"}
+    </button>
+  )
+})
+```
+
+Defects, such as thrown exceptions and errors turned into defects with
+`Effect.orDie`, are logged and reported to the browser, and the session
+goes on; see [errors and reconnects](#errors-and-reconnects). Type handler
+props of your own components as `View.Handler<...>`, not `() => void`,
+which accepts any result and so lets a failing Effect through.
+
 Events run one at a time, in arrival order, within each session. A slow
 handler delays later events from that browser. Other sessions can continue
 handling their own events.
@@ -614,7 +641,7 @@ separate steps. A failure in each step has a different outcome:
 
 | What fails | What happens to the page | What happens to state |
 | --- | --- | --- |
-| An event handler | The server logs the error and notifies the browser. The session continues accepting events. | Existing state stays, including changes made before the failure. |
+| An event handler, with a defect (it handles its own typed errors) | The server logs the defect and notifies the browser. The session continues accepting events. | Existing state stays, including changes made before the failure. |
 | A component inside `View.ErrorBoundary` | The boundary shows its fallback; the rest of the page remains live. | The session stays alive. The boundary retries when its subtree is invalidated. |
 | A component with a typed error handled by `View.catchTag` or `View.catchTags` | The handler's output renders in its place; the rest of the page remains live. | The same as with `View.ErrorBoundary`. |
 | A live render without a boundary to catch it | The server reports the error and closes the socket with code 1011. The browser tries to reconnect. | Reconnecting creates fresh component-local state. |
@@ -622,7 +649,7 @@ separate steps. A failure in each step has a different outcome:
 
 For example, if a Save handler updates local state and then a database
 write fails, the local update is **not rolled back**. Handle expected errors
-in the application and decide when to publish the state change. An update
+in the handler and decide when to publish the state change. An update
 or `modify` on one shared state serializes that operation; it does not make
 several state writes or external effects a transaction.
 

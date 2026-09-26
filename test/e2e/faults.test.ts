@@ -53,7 +53,7 @@ describe("faults over the wire", () => {
   it("a failing handler is reported and the session survives, with the state it changed", async () => {
     const s = await connect(url)
     assert.strictEqual((await s.next("first render")).t, "render")
-    s.send({ t: "event", type: "click", id: "r.0.2" }) // handler-fail: count + 1, then fail
+    s.send({ t: "event", type: "click", id: "r.0.2" }) // handler-fail: count + 1, then die
     const error = await s.next("error") as Extract<Message, { t: "error" }>
     assert.strictEqual(error.t, "error")
     assert.strictEqual(error.scope, "handler")

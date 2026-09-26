@@ -34,7 +34,7 @@ const Page = View.Component(function*() {
     <main>
       <output id="count">{count.value}</output>
       <button id="inc" onClick={() => count.update((n) => n + 1)}>+</button>
-      <button id="handler-fail" onClick={() => Effect.andThen(count.update((n) => n + 1), Effect.fail(new Error("handler failed on purpose")))}>fail</button>
+      <button id="handler-fail" onClick={() => Effect.andThen(count.update((n) => n + 1), Effect.die(new Error("handler failed on purpose")))}>fail</button>
       <button id="handler-throw" onClick={() => { throw new Error("handler threw on purpose") }}>throw</button>
       <button id="slow" onClick={() => Effect.sleep("2 seconds").pipe(Effect.andThen(say("slow handler finished")), Effect.onInterrupt(() => say("slow handler interrupted")))}>slow</button>
       <button id="render-fail" onClick={() => explode.set(true)}>explode</button>

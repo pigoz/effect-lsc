@@ -65,8 +65,10 @@ export const handlerKey = (event: string, id: string): string => `${event}:${id}
 /**
  * Runs the handler registered for a client event. Unknown ids are ignored:
  * they usually belong to a DOM that has since been re-rendered. A failing
- * handler (typed error or defect) is logged and passed to `report`; the
- * session goes on. State it changed before failing stays changed.
+ * handler (a defect, or a typed error that got past the types through a
+ * cast or a function typed as returning `void`) is logged and passed to
+ * `report`; the session goes on. State it changed before failing stays
+ * changed.
  */
 export const dispatch = (
   session: Session,

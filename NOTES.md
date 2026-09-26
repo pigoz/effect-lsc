@@ -73,6 +73,9 @@ Effect atoms; see [atoms](./ARCHITECTURE.md#atoms).
   `yield* View.use(Member)`. Components would have to be iterable, and a
   plain function returning an Effect is not, so `View.use` would remain for
   those.
+- **Typed handler errors:** handlers must handle theirs. Tracking them in
+  the type would need handlers declared in the component body, as
+  `View.use` does for components. Left for when a real case needs it.
 
 ### Atoms
 

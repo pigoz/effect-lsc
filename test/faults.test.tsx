@@ -1,7 +1,7 @@
 // Fault injection at the unit level: what the session does when handlers
 // and renders fail, and what it leaves behind.
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Exit, Ref, Scope } from "effect"
+import { Cause, Deferred, Effect, Exit, Logger, Ref, Scope } from "effect"
 import { View } from "effect-lsc/view"
 import { render } from "../src/internal/render.ts"
 import { dispatch, makeSession } from "../src/internal/session.ts"
@@ -196,7 +196,7 @@ describe("failure semantics", () => {
       assert.strictEqual(yield* render(session, <App explode={false} pass={true} />), "<b>ok</b>")
     }))
 
-  it.effect("handler failures and defects are reported and the session goes on", () =>
+  it.effect("handler defects are reported and the session goes on", () =>
     Effect.gen(function*() {
       const reported: Array<string> = []
       const report = (cause: Cause.Cause<unknown>) => Effect.sync(() => { reported.push(String(Cause.squash(cause))) })
@@ -204,7 +204,7 @@ describe("failure semantics", () => {
         const n = yield* View.State(0)
         return (
           <main>
-            <button id="fail" onClick={() => Effect.andThen(n.update((x) => x + 1), Effect.fail(new Error("typed failure")))}>fail</button>
+            <button id="die" onClick={() => Effect.andThen(n.update((x) => x + 1), Effect.die(new Error("died")))}>die</button>
             <button id="throw" onClick={() => { throw new Error("thrown") }}>throw</button>
             <button id="ok" onClick={() => n.update((x) => x + 10)}>ok</button>
             <output>{n.value}</output>
@@ -216,8 +216,36 @@ describe("failure semantics", () => {
       yield* dispatch(session, { t: "event", type: "click", id: "r.0.0" }, report)
       yield* dispatch(session, { t: "event", type: "click", id: "r.0.1" }, report)
       yield* dispatch(session, { t: "event", type: "click", id: "r.0.2" }, report)
-      assert.deepStrictEqual(reported, ["Error: typed failure", "Error: thrown"])
-      // the state change made before the typed failure stuck, and the ok handler ran after
+      assert.deepStrictEqual(reported, ["Error: died", "Error: thrown"])
+      // the state change made before the defect stuck, and the ok handler ran after
+      assert.include(yield* render(session, <Page />), "<output>11</output>")
+    }))
+
+  it.effect("a typed failure that gets past the types is logged and reported, and the session goes on", () =>
+    Effect.gen(function*() {
+      const logs: Array<string> = []
+      const logger = Logger.make(({ message }) => { logs.push(String(message)) })
+      const reported: Array<string> = []
+      const report = (cause: Cause.Cause<unknown>) => Effect.sync(() => { reported.push(String(Cause.squash(cause))) })
+      const Page = View.Component(function*() {
+        const n = yield* View.State(0)
+        // handlers cannot fail with typed errors (E = never); a cast still lets one through
+        const fail = (() => Effect.andThen(n.update((x) => x + 1), Effect.fail(new Error("typed failure")))) as unknown as View.Handler
+        return (
+          <main>
+            <button id="fail" onClick={fail}>fail</button>
+            <button id="ok" onClick={() => n.update((x) => x + 10)}>ok</button>
+            <output>{n.value}</output>
+          </main>
+        )
+      })
+      const session = yield* makeSession()
+      yield* render(session, <Page />)
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.0" }, report).pipe(Effect.provide(Logger.layer([logger])))
+      yield* dispatch(session, { t: "event", type: "click", id: "r.0.1" }, report)
+      assert.deepStrictEqual(reported, ["Error: typed failure"])
+      assert.isTrue(logs.some((line) => line.includes("effect-lsc: click handler at r.0.0 failed")))
+      // the state change made before the failure stuck, and the ok handler ran after
       assert.include(yield* render(session, <Page />), "<output>11</output>")
     }))
 

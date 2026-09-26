@@ -275,7 +275,7 @@ describe("session", () => {
 
   it.effect("handler failures are logged, not fatal", () =>
     Effect.gen(function*() {
-      const Boom = () => <button onClick={() => Effect.fail("nope")}>x</button>
+      const Boom = () => <button onClick={() => Effect.die("nope")}>x</button>
       const session = yield* makeSession()
       const html = yield* render(session, <Boom />)
       yield* click(session, html)

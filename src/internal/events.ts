@@ -49,5 +49,16 @@ export type ViewEvent = MouseEvent | InputEvent | KeyboardEvent | SubmitEvent | 
  * Handlers cannot require services (`R` is `never`): acquire what you need in
  * the component body with `yield*` and close over it. That keeps the set of
  * services a page needs visible in the component's type.
+ *
+ * Nor can they fail with typed errors: the returned Effect's error type is
+ * `never`. The session runs each event as a program of its own, like a
+ * root, and a root must not leave typed errors unhandled, as `Server.mount`
+ * requires of renders. Handle expected errors in the handler, with
+ * `Effect.catchTag`, `Effect.catch` or `Effect.orDie`. Defects are logged
+ * and reported to the browser, and the session goes on.
+ *
+ * Type handler props of your own components as `View.Handler<...>`, not
+ * `() => void`: a function typed as returning `void` accepts any result,
+ * a failing Effect included, and the rule no longer reaches the caller.
  */
-export type Handler<E extends EventBase = EventBase> = (event: E) => Effect.Effect<unknown, unknown, never> | void
+export type Handler<E extends EventBase = EventBase> = (event: E) => Effect.Effect<unknown, never, never> | void
